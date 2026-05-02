@@ -1,6 +1,11 @@
 # MazeRoomba
 
-## IO Pin Mappings
+## RC Car ESP32 Pinout
+
+Board role:
+- Receiver / vehicle controller
+- MAC: `14:33:5C:61:11:40`
+- Sketch: `MazeRoomba/RC_Car_ESPNow/RC_Car_ESPNow.ino`
 
 ### Left Stepper Motor (Motor 1)
 - `GPIO 27` -> `M1_IN1`
@@ -14,19 +19,41 @@
 - `GPIO 33` -> `M2_IN3`
 - `GPIO 32` -> `M2_IN4`
 
-### Potentiometer Controller
-- `GPIO 34` -> `STEERING_POT`
-- `GPIO 35` -> `THROTTLE_POT`
-- `GPIO 32` -> `BRAKE_REVERSE_POT`
+Notes:
+- The sketch uses `AccelStepper::HALF4WIRE` with pin order `IN1, IN3, IN2, IN4`.
+- The left motor direction is inverted in software so both sides move forward together.
 
-### Joystick
+## Controller ESP32 Pinout
+
+Board role:
+- Handheld transmitter
+- MAC: `14:33:5C:25:5B:48`
+- Sketch: `Steering/Pot_Controller_ESPNow/Pot_Controller_ESPNow.ino`
+
+### Potentiometers
+- `GPIO 34` -> `STEERING_POT` wiper
+- `GPIO 35` -> `THROTTLE_POT` wiper
+- `GPIO 32` -> `BRAKE_REVERSE_POT` wiper
+
+### Pot Wiring
+- Pot outer pin -> `3.3V`
+- Other outer pin -> `GND`
+- Pot center pin / wiper -> assigned GPIO above
+
+Notes:
+- `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
+- The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
+
+## Wireless Link
+
+- Protocol: `ESP-NOW`
+- Channel: `6`
+- The controller sends steering, throttle, brake, and reverse-arm state to the car.
+- The car accepts packets from the controller MAC above and stops if packets time out.
+
+## Legacy Joystick Test Pinout
+
+These pins are still used by the older joystick-based test sketch and are not used by the wireless RC controller pair:
+
 - `GPIO 35` -> `JOY_X` (`VRX`)
 - `GPIO 34` -> `JOY_Y` (`VRY`)
-
-## Wireless Roles
-
-- RC car receiver ESP32 MAC: `14:33:5C:61:11:40`
-- Controller transmitter ESP32 MAC: `14:33:5C:25:5B:48`
-- `MazeRoomba/RC_Car_ESPNow/RC_Car_ESPNow.ino` uses the stepper pin mapping above and receives control packets over `ESP-NOW`.
-- `Steering/Pot_Controller_ESPNow/Pot_Controller_ESPNow.ino` reads the three potentiometers above and sends control packets over `ESP-NOW`.
-- The older joystick mapping remains documented for the existing joystick test sketch, but the wireless RC car pair ignores the joystick input.
