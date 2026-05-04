@@ -13,15 +13,18 @@ const int ADC_MAX = 4095;
 const int STEER_DEADZONE = 120;
 const int CALIBRATION_SAMPLES = 100;
 const int COMMAND_SCALE = 1000;
-const int BRAKE_ARM_THRESHOLD = 3800;
-const int BRAKE_RELEASE_THRESHOLD = 250;
+const int BRAKE_RELEASE_RAW = 4095;
+const int BRAKE_FULL_PRESS_RAW = 1600;
+const int BRAKE_RELEASE_BAND = 40;
+const int BRAKE_FULL_PRESS_BAND = 40;
+const float BRAKE_RELEASE_LEVEL = 0.05f;
+const float BRAKE_ARM_LEVEL = 0.95f;
 const unsigned long REVERSE_HOLD_MS = 2000;
 const unsigned long SEND_INTERVAL_MS = 40;
 const unsigned long PRINT_INTERVAL_MS = 250;
 
 const bool INVERT_STEERING = false;
 const bool INVERT_THROTTLE = false;
-const bool INVERT_BRAKE = false;
 
 struct __attribute__((packed)) ControlPacket {
   uint32_t seq;
@@ -88,6 +91,20 @@ float normalizeRange(int raw, bool invert) {
 
   if (normalized < 0.02f) normalized = 0.0f;
   if (normalized > 0.98f) normalized = 1.0f;
+  return clampFloat(normalized, 0.0f, 1.0f);
+}
+
+float normalizeBrake(int raw) {
+  // This pedal is mechanically reversed and only spans part of the ADC range.
+  if (raw >= BRAKE_RELEASE_RAW - BRAKE_RELEASE_BAND) {
+    return 0.0f;
+  }
+
+  if (raw <= BRAKE_FULL_PRESS_RAW + BRAKE_FULL_PRESS_BAND) {
+    return 1.0f;
+  }
+
+  float normalized = (BRAKE_RELEASE_RAW - raw) / (float)(BRAKE_RELEASE_RAW - BRAKE_FULL_PRESS_RAW);
   return clampFloat(normalized, 0.0f, 1.0f);
 }
 
@@ -172,13 +189,13 @@ void loop() {
 
   float steer = normalizeCentered(rawSteer, steerCenter, INVERT_STEERING);
   float throttle = normalizeRange(rawThrottle, INVERT_THROTTLE);
-  float brake = normalizeRange(rawBrake, INVERT_BRAKE);
+  float brake = normalizeBrake(rawBrake);
 
-  if (rawBrake <= BRAKE_RELEASE_THRESHOLD) {
+  if (brake <= BRAKE_RELEASE_LEVEL) {
     reverseArmed = false;
     brakeHoldStart = 0;
   } else if (!reverseArmed) {
-    if (rawBrake >= BRAKE_ARM_THRESHOLD) {
+    if (brake >= BRAKE_ARM_LEVEL) {
       if (brakeHoldStart == 0) {
         brakeHoldStart = now;
       } else if (now - brakeHoldStart >= REVERSE_HOLD_MS) {
@@ -209,6 +226,8 @@ void loop() {
       Serial.print(rawThrottle);
       Serial.print("  BrakeRaw: ");
       Serial.print(rawBrake);
+      Serial.print("  BrakeNorm: ");
+      Serial.print(brake, 2);
       Serial.print("  SteerCmd: ");
       Serial.print(packet.steer);
       Serial.print("  ThrottleCmd: ");
