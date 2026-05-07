@@ -57,3 +57,31 @@ These pins are still used by the older joystick-based test sketch and are not us
 
 - `GPIO 35` -> `JOY_X` (`VRX`)
 - `GPIO 34` -> `JOY_Y` (`VRY`)
+
+# Vibration
+
+## Vibration Motor Test Pinout
+
+Board role:
+- Vibration motor controller
+- Sketch: `Vibration/spinnything.ino`
+
+### Motor Driver 1
+- `GPIO 25` -> `M1_PWM`
+- `GPIO 26` -> `M1_DIR`
+- `GPIO 14` -> `BTN_1`
+- `GPIO 17` -> `M2_PWM`
+- `GPIO 27` -> `M2_DIR`
+- `GPIO 12` -> `BTN_2`
+
+### Motor Driver 2
+- `GPIO 5` -> `M3_PWM`
+- `GPIO 13` -> `M3_DIR`
+- `GPIO 33` -> `BTN_3`
+- `GPIO 23` -> `M4_PWM`
+- `GPIO 19` -> `M4_DIR`
+- `GPIO 32` -> `BTN_4`
+
+Notes:
+- The sketch uses pushbuttons with `INPUT_PULLUP` to independently trigger each motor.
+- When triggered, each motor runs for a fixed duration of 1000ms.
