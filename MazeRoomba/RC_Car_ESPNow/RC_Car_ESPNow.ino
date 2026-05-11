@@ -14,6 +14,10 @@
 #define M2_IN3 33
 #define M2_IN4 32
 
+// Joystick pins (SW unused)
+#define JOY_VRX_PIN 35
+#define JOY_VRY_PIN 34
+
 const uint8_t LOCAL_MAC[6] = {0x14, 0x33, 0x5C, 0x61, 0x11, 0x40};
 const uint8_t CONTROLLER_MAC[6] = {0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48};
 const uint8_t ESPNOW_CHANNEL = 6;
@@ -24,12 +28,24 @@ const int COMMAND_SCALE = 1000;
 const unsigned long PACKET_TIMEOUT_MS = 250;
 const unsigned long PRINT_INTERVAL_MS = 500;
 
+const int JOY_DEADZONE = 300;
+const int JOY_ADC_MAX = 4095;
+const int JOY_CALIBRATION_SAMPLES = 100;
+const unsigned long JOY_SEND_INTERVAL_MS = 40;
+
 struct __attribute__((packed)) ControlPacket {
   uint32_t seq;
   int16_t steer;
   uint16_t throttle;
   uint16_t brake;
   uint8_t reverseArmed;
+};
+
+struct __attribute__((packed)) FeedbackPacket {
+  uint32_t seq;
+  uint8_t deflected;
+  int16_t joyX;
+  int16_t joyY;
 };
 
 // Note pin order: IN1, IN3, IN2, IN4 for correct half-step phasing
@@ -47,6 +63,11 @@ unsigned long lastPrintTime = 0;
 unsigned long lastRampTime = 0;
 bool failsafeActive = true;
 
+int joyCenterX = 0;
+int joyCenterY = 0;
+unsigned long lastJoySendTime = 0;
+uint32_t feedbackSeq = 0;
+
 float clampFloat(float value, float minimum, float maximum) {
   if (value < minimum) return minimum;
   if (value > maximum) return maximum;
@@ -58,6 +79,15 @@ float rampToward(float current, float target, float maxDelta) {
   if (diff > maxDelta) return current + maxDelta;
   if (diff < -maxDelta) return current - maxDelta;
   return target;
+}
+
+float normalizeJoyAxis(int raw, int center) {
+  int offset = raw - center;
+  if (abs(offset) <= JOY_DEADZONE) return 0.0f;
+  int span = (offset > 0) ? (JOY_ADC_MAX - center) : center;
+  if (span <= JOY_DEADZONE) return 0.0f;
+  float mag = (abs(offset) - JOY_DEADZONE) / (float)(span - JOY_DEADZONE);
+  return clampFloat((offset > 0 ? 1.0f : -1.0f) * mag, -1.0f, 1.0f);
 }
 
 String macToString(const uint8_t *mac) {
@@ -140,13 +170,33 @@ void setupEspNow() {
   }
 }
 
+void calibrateJoystickCenter() {
+  Serial.println("Calibrating joystick center - leave the joystick centered...");
+  long totalX = 0;
+  long totalY = 0;
+  for (int i = 0; i < JOY_CALIBRATION_SAMPLES; i++) {
+    totalX += analogRead(JOY_VRX_PIN);
+    totalY += analogRead(JOY_VRY_PIN);
+    delay(10);
+  }
+  joyCenterX = totalX / JOY_CALIBRATION_SAMPLES;
+  joyCenterY = totalY / JOY_CALIBRATION_SAMPLES;
+  Serial.print("Joystick center X: ");
+  Serial.print(joyCenterX);
+  Serial.print("  Y: ");
+  Serial.println(joyCenterY);
+}
+
 void setup() {
   Serial.begin(115200);
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
 
   stepper1.setMaxSpeed(MAX_SPEED);
   stepper2.setMaxSpeed(MAX_SPEED);
 
   setupEspNow();
+  calibrateJoystickCenter();
 
   Serial.println("RC car receiver ready");
   lastRampTime = millis();
@@ -201,6 +251,21 @@ void loop() {
   stepper2.setSpeed(currentRight);
   stepper1.runSpeed();
   stepper2.runSpeed();
+
+  if (now - lastJoySendTime >= JOY_SEND_INTERVAL_MS) {
+    lastJoySendTime = now;
+
+    float jx = normalizeJoyAxis(analogRead(JOY_VRX_PIN), joyCenterX);
+    float jy = normalizeJoyAxis(analogRead(JOY_VRY_PIN), joyCenterY);
+
+    FeedbackPacket fb = {};
+    fb.seq = ++feedbackSeq;
+    fb.deflected = (jx != 0.0f || jy != 0.0f) ? 1 : 0;
+    fb.joyX = (int16_t)lroundf(jx * COMMAND_SCALE);
+    fb.joyY = (int16_t)lroundf(jy * COMMAND_SCALE);
+
+    esp_now_send(CONTROLLER_MAC, reinterpret_cast<const uint8_t *>(&fb), sizeof(fb));
+  }
 
   if (now - lastPrintTime >= PRINT_INTERVAL_MS) {
     lastPrintTime = now;
