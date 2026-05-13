@@ -84,7 +84,7 @@ The older test sketch at `MazeRoomba/Stepper-test/Joystick/Joystick.ino` used `G
 
 Board role:
 - Vibration motor controller
-- Sketch: `Vibration/spinnything.ino`
+- Sketch: `Vibration/spinnything/spinnything.ino`
 
 ### Motor Driver 1
 - `GPIO 25` -> `M1_PWM`
