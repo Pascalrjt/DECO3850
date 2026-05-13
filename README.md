@@ -80,28 +80,51 @@ The older test sketch at `MazeRoomba/Stepper-test/Joystick/Joystick.ino` used `G
 
 # Vibration
 
-## Vibration Motor Test Pinout
+## MotorESP Pinout
 
 Board role:
-- Vibration motor controller
+- Vibration motor controller (ESP-NOW receiver)
+- MAC: `c0:cd:d6:81:ff:80`
 - Sketch: `Vibration/spinnything/spinnything.ino`
 
-### Motor Driver 1
+### Motor Driver 1 (all channels ESP-NOW triggered)
 - `GPIO 25` -> `M1_PWM`
 - `GPIO 26` -> `M1_DIR`
-- `GPIO 14` -> `BTN_1`
 - `GPIO 17` -> `M2_PWM`
 - `GPIO 27` -> `M2_DIR`
-- `GPIO 12` -> `BTN_2`
 
-### Motor Driver 2
-- `GPIO 5` -> `M3_PWM`
+### Motor Driver 2 (all channels ESP-NOW triggered)
+- `GPIO 5`  -> `M3_PWM`
 - `GPIO 13` -> `M3_DIR`
-- `GPIO 33` -> `BTN_3`
 - `GPIO 23` -> `M4_PWM`
 - `GPIO 19` -> `M4_DIR`
-- `GPIO 32` -> `BTN_4`
 
 Notes:
-- The sketch uses pushbuttons with `INPUT_PULLUP` to independently trigger each motor.
-- When triggered, each motor runs for a fixed duration of 1000ms.
+- All four motors are triggered wirelessly by ButtonESP over ESP-NOW.
+- Each motor runs for 1000ms per trigger and stops automatically.
+- If a motor is already running, a second trigger for the same motor is ignored until it stops.
+
+## ButtonESP Pinout
+
+Board role:
+- Button transmitter (ESP-NOW sender)
+- MAC: `68:fe:71:2b:75:d8`
+- Sketch: `Vibration/buttonTrigger/buttonTrigger.ino`
+
+### Buttons
+- `GPIO 27` -> `BTN_1` (triggers Motor 1)
+- `GPIO 14` -> `BTN_2` (triggers Motor 2)
+- `GPIO 12` -> `BTN_3` (triggers Motor 3)
+- `GPIO 13` -> `BTN_4` (triggers Motor 4)
+
+Notes:
+- All buttons use `INPUT_PULLUP`; connect one side to the GPIO and the other to `GND`.
+- A press sends a one-byte command to MotorESP on the falling edge only.
+
+## Vibration Wireless Link
+
+- Protocol: `ESP-NOW`
+- ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button press.
+- Command byte mapping: `0x01` = Motor 1, `0x02` = Motor 2, `0x03` = Motor 3, `0x04` = Motor 4.
+- MotorESP starts the corresponding motor on receipt and stops it automatically after 1000ms.
+
