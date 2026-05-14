@@ -37,6 +37,9 @@ void onDataSent(const wifi_tx_info_t *txInfo, esp_now_send_status_t status) {
 }
 
 void sendTrigger(uint8_t motorCmd) {
+  Serial.print("Button ");
+  Serial.print(motorCmd);
+  Serial.println(" pressed");
   packet.command = motorCmd;
   esp_now_send(motorEspMac, (uint8_t *)&packet, sizeof(packet));
   Serial.print("-> Sent trigger for Motor ");
