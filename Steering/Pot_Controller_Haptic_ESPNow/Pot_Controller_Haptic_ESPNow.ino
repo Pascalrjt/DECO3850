@@ -5,12 +5,19 @@ const int POT_STEER_PIN = 34;
 const int POT_THROTTLE_PIN = 35;
 const int POT_BRAKE_PIN = 32;
 
+// Wall haptic motor (DFRobot dual driver M1 channel)
 const int HAPTIC_PWM_PIN = 25;
 const int HAPTIC_DIR_PIN = 26;
 const int HAPTIC_PWM_LEVEL = 10;
 
+// Proximity haptic motor (DFRobot dual driver M2 channel)
+const int PROX_PWM_PIN = 27;
+const int PROX_DIR_PIN = 33;
+
 const uint8_t LOCAL_MAC[6] = {0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48};
 const uint8_t CAR_MAC[6] = {0x14, 0x33, 0x5C, 0x61, 0x11, 0x40};
+// TODO: replace with the actual MAC printed by the bridge at startup
+const uint8_t BRIDGE_MAC[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 const uint8_t ESPNOW_CHANNEL = 6;
 
 const int ADC_MAX = 4095;
@@ -27,6 +34,7 @@ const unsigned long REVERSE_HOLD_MS = 2000;
 const unsigned long SEND_INTERVAL_MS = 40;
 const unsigned long PRINT_INTERVAL_MS = 250;
 const unsigned long FEEDBACK_TIMEOUT_MS = 500;
+const unsigned long PROX_TIMEOUT_MS = 500;
 
 const bool INVERT_STEERING = false;
 const bool INVERT_THROTTLE = false;
@@ -46,6 +54,16 @@ struct __attribute__((packed)) FeedbackPacket {
   int16_t joyY;
 };
 
+struct __attribute__((packed)) ProximityPacket {
+  uint32_t seq;
+  uint8_t strength;
+  uint16_t pulse_on_ms;
+  uint16_t pulse_off_ms;
+  uint8_t flags;
+};
+
+const uint8_t PROX_FLAG_VALID = 0x01;
+
 int steerCenter = 0;
 bool reverseArmed = false;
 unsigned long brakeHoldStart = 0;
@@ -53,11 +71,24 @@ unsigned long lastSendTime = 0;
 unsigned long lastPrintTime = 0;
 uint32_t packetSequence = 0;
 
+// Wall haptic state
 portMUX_TYPE feedbackMux = portMUX_INITIALIZER_UNLOCKED;
 FeedbackPacket latestFeedback = {};
 bool hasFeedback = false;
 unsigned long lastFeedbackMs = 0;
-bool motorRunning = false;
+bool wallMotorOn = false;
+
+// Proximity haptic state
+portMUX_TYPE proxMux = portMUX_INITIALIZER_UNLOCKED;
+ProximityPacket latestProximity = {};
+bool hasProximity = false;
+unsigned long lastProxMs = 0;
+
+bool proxMotorOn = false;
+unsigned long proxPulseStart = 0;
+uint8_t proxStrength = 0;
+uint16_t proxPulseOn = 0;
+uint16_t proxPulseOff = 0;
 
 float clampFloat(float value, float minimum, float maximum) {
   if (value < minimum) return minimum;
@@ -133,23 +164,34 @@ uint16_t scaledUnsignedCommand(float normalized) {
   return (uint16_t)lroundf(clampFloat(normalized, 0.0f, 1.0f) * COMMAND_SCALE);
 }
 
-void onFeedbackRecv(const esp_now_recv_info_t *info, const uint8_t *data, int dataLen) {
-  if (dataLen != sizeof(FeedbackPacket)) {
-    return;
+void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int dataLen) {
+  if (dataLen == sizeof(FeedbackPacket) && macsEqual(info->src_addr, CAR_MAC)) {
+    FeedbackPacket fb;
+    memcpy(&fb, data, sizeof(fb));
+
+    portENTER_CRITICAL(&feedbackMux);
+    latestFeedback = fb;
+    hasFeedback = true;
+    lastFeedbackMs = millis();
+    portEXIT_CRITICAL(&feedbackMux);
+
+  } else if (dataLen == sizeof(ProximityPacket)) {
+    ProximityPacket pkt;
+    memcpy(&pkt, data, sizeof(pkt));
+
+    portENTER_CRITICAL(&proxMux);
+    latestProximity = pkt;
+    hasProximity = true;
+    lastProxMs = millis();
+    portEXIT_CRITICAL(&proxMux);
   }
+}
 
-  if (!macsEqual(info->src_addr, CAR_MAC)) {
-    return;
+bool bridgeMacIsSet() {
+  for (int i = 0; i < 6; i++) {
+    if (BRIDGE_MAC[i] != 0x00) return true;
   }
-
-  FeedbackPacket fb;
-  memcpy(&fb, data, sizeof(fb));
-
-  portENTER_CRITICAL(&feedbackMux);
-  latestFeedback = fb;
-  hasFeedback = true;
-  lastFeedbackMs = millis();
-  portEXIT_CRITICAL(&feedbackMux);
+  return false;
 }
 
 void setupEspNow() {
@@ -173,6 +215,12 @@ void setupEspNow() {
   }
   Serial.print("Target car MAC: ");
   Serial.println(macToString(CAR_MAC));
+  Serial.print("Bridge MAC: ");
+  Serial.println(macToString(BRIDGE_MAC));
+  if (!bridgeMacIsSet()) {
+    Serial.println("Warning: BRIDGE_MAC is all zeros - update it with the real bridge MAC.");
+    Serial.println("Proximity packets will still be accepted by size, but add the peer for reliability.");
+  }
   Serial.print("ESP-NOW channel: ");
   Serial.println(ESPNOW_CHANNEL);
 
@@ -180,18 +228,31 @@ void setupEspNow() {
     restartWithMessage(F("ESP-NOW init failed. Rebooting..."));
   }
 
-  esp_now_peer_info_t peerInfo = {};
-  memcpy(peerInfo.peer_addr, CAR_MAC, sizeof(CAR_MAC));
-  peerInfo.channel = ESPNOW_CHANNEL;
-  peerInfo.ifidx = WIFI_IF_STA;
-  peerInfo.encrypt = false;
+  esp_now_peer_info_t carPeer = {};
+  memcpy(carPeer.peer_addr, CAR_MAC, sizeof(CAR_MAC));
+  carPeer.channel = ESPNOW_CHANNEL;
+  carPeer.ifidx = WIFI_IF_STA;
+  carPeer.encrypt = false;
 
-  esp_err_t addPeerResult = esp_now_add_peer(&peerInfo);
-  if (addPeerResult != ESP_OK && addPeerResult != ESP_ERR_ESPNOW_EXIST) {
+  esp_err_t result = esp_now_add_peer(&carPeer);
+  if (result != ESP_OK && result != ESP_ERR_ESPNOW_EXIST) {
     restartWithMessage(F("Failed to register car peer. Rebooting..."));
   }
 
-  if (esp_now_register_recv_cb(onFeedbackRecv) != ESP_OK) {
+  if (bridgeMacIsSet()) {
+    esp_now_peer_info_t bridgePeer = {};
+    memcpy(bridgePeer.peer_addr, BRIDGE_MAC, sizeof(BRIDGE_MAC));
+    bridgePeer.channel = ESPNOW_CHANNEL;
+    bridgePeer.ifidx = WIFI_IF_STA;
+    bridgePeer.encrypt = false;
+
+    result = esp_now_add_peer(&bridgePeer);
+    if (result != ESP_OK && result != ESP_ERR_ESPNOW_EXIST) {
+      Serial.println("Warning: failed to register bridge peer.");
+    }
+  }
+
+  if (esp_now_register_recv_cb(onEspNowRecv) != ESP_OK) {
     restartWithMessage(F("Failed to register receive callback. Rebooting..."));
   }
 }
@@ -220,10 +281,15 @@ void setup() {
   digitalWrite(HAPTIC_DIR_PIN, LOW);
   digitalWrite(HAPTIC_PWM_PIN, LOW);
 
+  pinMode(PROX_PWM_PIN, OUTPUT);
+  pinMode(PROX_DIR_PIN, OUTPUT);
+  digitalWrite(PROX_DIR_PIN, LOW);
+  digitalWrite(PROX_PWM_PIN, LOW);
+
   setupEspNow();
   calibrateSteeringCenter();
 
-  Serial.println("Pot controller transmitter (haptic) ready");
+  Serial.println("Pot controller transmitter (haptic + proximity) ready");
 }
 
 void loop() {
@@ -264,7 +330,7 @@ void loop() {
     esp_now_send(CAR_MAC, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
   }
 
-  // --- Haptic motor feedback ---
+  // --- Wall haptic (M1) ---
   FeedbackPacket fb = {};
   bool fbValid = false;
   unsigned long fbAge = 0;
@@ -277,16 +343,70 @@ void loop() {
   }
   portEXIT_CRITICAL(&feedbackMux);
 
-  bool wantMotor = fbValid && fbAge <= FEEDBACK_TIMEOUT_MS && fb.deflected == 1;
+  bool wantWallMotor = fbValid && fbAge <= FEEDBACK_TIMEOUT_MS && fb.deflected == 1;
 
-  if (wantMotor && !motorRunning) {
+  if (wantWallMotor && !wallMotorOn) {
     digitalWrite(HAPTIC_DIR_PIN, HIGH);
     analogWrite(HAPTIC_PWM_PIN, HAPTIC_PWM_LEVEL);
-    motorRunning = true;
-  } else if (!wantMotor && motorRunning) {
+    wallMotorOn = true;
+  } else if (!wantWallMotor && wallMotorOn) {
     analogWrite(HAPTIC_PWM_PIN, 0);
     digitalWrite(HAPTIC_DIR_PIN, LOW);
-    motorRunning = false;
+    wallMotorOn = false;
+  }
+
+  // --- Proximity haptic (M2) ---
+  ProximityPacket prox = {};
+  bool proxValid = false;
+  unsigned long proxAge = 0;
+
+  portENTER_CRITICAL(&proxMux);
+  if (hasProximity) {
+    prox = latestProximity;
+    proxAge = now - lastProxMs;
+    proxValid = true;
+  }
+  portEXIT_CRITICAL(&proxMux);
+
+  bool proxActive = proxValid
+                    && proxAge <= PROX_TIMEOUT_MS
+                    && (prox.flags & PROX_FLAG_VALID)
+                    && prox.strength > 0;
+
+  if (proxActive) {
+    if (proxStrength != prox.strength || proxPulseOn != prox.pulse_on_ms
+        || proxPulseOff != prox.pulse_off_ms) {
+      proxStrength = prox.strength;
+      proxPulseOn = prox.pulse_on_ms;
+      proxPulseOff = prox.pulse_off_ms;
+    }
+
+    if (proxPulseOff == 0) {
+      if (!proxMotorOn) {
+        digitalWrite(PROX_DIR_PIN, HIGH);
+        analogWrite(PROX_PWM_PIN, proxStrength);
+        proxMotorOn = true;
+      }
+    } else {
+      unsigned long elapsed = now - proxPulseStart;
+      if (proxMotorOn && elapsed >= proxPulseOn) {
+        analogWrite(PROX_PWM_PIN, 0);
+        digitalWrite(PROX_DIR_PIN, LOW);
+        proxMotorOn = false;
+        proxPulseStart = now;
+      } else if (!proxMotorOn && elapsed >= proxPulseOff) {
+        digitalWrite(PROX_DIR_PIN, HIGH);
+        analogWrite(PROX_PWM_PIN, proxStrength);
+        proxMotorOn = true;
+        proxPulseStart = now;
+      }
+    }
+  } else {
+    if (proxMotorOn) {
+      analogWrite(PROX_PWM_PIN, 0);
+      digitalWrite(PROX_DIR_PIN, LOW);
+      proxMotorOn = false;
+    }
   }
 
   if (now - lastPrintTime >= PRINT_INTERVAL_MS) {
@@ -301,11 +421,19 @@ void loop() {
     Serial.print(brake, 2);
     Serial.print("  Reverse: ");
     Serial.print(reverseArmed);
-    Serial.print("  Haptic: ");
-    Serial.print(motorRunning ? "ON" : "OFF");
+    Serial.print("  Wall: ");
+    Serial.print(wallMotorOn ? "ON" : "OFF");
+    Serial.print("  Prox: ");
+    Serial.print(proxMotorOn ? "ON" : "OFF");
+    Serial.print("  ProxStr: ");
+    Serial.print(proxStrength);
     Serial.print("  FbSeq: ");
     Serial.print(fb.seq);
     Serial.print("  FbAge: ");
-    Serial.println(fbAge);
+    Serial.print(fbAge);
+    Serial.print("  PxSeq: ");
+    Serial.print(prox.seq);
+    Serial.print("  PxAge: ");
+    Serial.println(proxAge);
   }
 }

@@ -50,19 +50,38 @@ Board role:
 - Other outer pin -> `GND`
 - Pot center pin / wiper -> assigned GPIO above
 
-### Haptic Motor Driver (DFRobot dual driver, Motor 1 channel)
+### Haptic Motor Driver (DFRobot dual driver)
+
+#### Wall feedback — M1 channel
 - `GPIO 25` -> `M1_PWM`
 - `GPIO 26` -> `M1_DIR`
+- Motor wires -> driver `M1+` / `M1-` terminals
+
+#### Proximity feedback — M2 channel
+- `GPIO 27` -> `M2_PWM`
+- `GPIO 33` -> `M2_DIR`
+- Motor wires -> driver `M2+` / `M2-` terminals
+
+#### Driver power
 - Driver `GND` -> ESP32 `GND` (common ground)
 - Driver `VCC` -> `5V` (logic supply, can share USB 5V)
 - Driver `VM` -> external motor power supply positive (6-12V typical)
 - Motor supply `GND` -> driver `GND` (common ground)
-- Motor wires -> driver `M1+` / `M1-` terminals
 
 Notes:
 - `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
 - The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
-- The haptic motor runs at PWM duty 150/255 while the car-side joystick is deflected, and stops immediately when the joystick returns to center or the feedback link times out.
+- The wall haptic motor (M1) runs while the car-side joystick is deflected and stops immediately when the joystick returns to center or the feedback link times out.
+- The proximity haptic motor (M2) pulses at a rate and strength dictated by `ProximityPacket` messages from the bridge ESP32. Faster pulses mean the car is closer to the destination.
+
+## Bridge ESP32 Pinout
+
+Board role:
+- USB-serial to ESP-NOW bridge for proximity data
+- MAC: update `BRIDGE_MAC` in the controller sketch with the value printed at bridge startup
+- Sketch: `Bridge/ProximityBridge_ESPNow/ProximityBridge_ESPNow.ino`
+
+No additional GPIO wiring — the bridge only uses USB serial for data input and ESP-NOW for output. Connect it to the PC running `Vision/proximity_tracker.py` via USB.
 
 ## Wireless Link
 
@@ -70,9 +89,18 @@ Notes:
 - Channel: `6`
 - The controller sends `ControlPacket` (steering, throttle, brake, reverse-arm) to the car every 40 ms.
 - The car sends `FeedbackPacket` (joystick deflection state, X/Y values) back to the controller every 40 ms.
-- Both sides distinguish packet types by length and reject unexpected sizes.
+- The bridge sends `ProximityPacket` (motor strength, pulse timing, flags) to the controller at ~20 Hz.
+- All three packet types have distinct sizes (11 / 9 / 10 bytes) so the controller dispatches by `dataLen`.
 - The car stops driving if controller packets time out (250 ms).
-- The controller stops the haptic motor if feedback packets time out (500 ms).
+- The controller stops each haptic motor independently if the corresponding packet stream times out (500 ms).
+
+## Proximity Tracking (PC-side)
+
+- Script: `Vision/proximity_tracker.py`
+- Dependencies: `Vision/requirements.txt` (`pip install -r Vision/requirements.txt`)
+- An overhead webcam views the 1.2 m × 1.2 m maze. The overseer calibrates four maze corners (click TL, TR, BR, BL) and clicks to set the destination.
+- A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean distance to the destination is converted to motor parameters (strength and pulse rate).
+- Motor parameters are sent as framed binary packets over USB serial to the bridge ESP32, which rebroadcasts them via ESP-NOW.
 
 ## Legacy Joystick Test Pinout
 
