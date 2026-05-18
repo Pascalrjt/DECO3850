@@ -1,6 +1,9 @@
 // buttonTrigger.ino — ButtonESP
-// Sends an ESP-NOW command to MotorESP for each of the 4 big buttons.
-// Each button maps to one vibration motor on the MotorESP.
+// Sends ESP-NOW START/STOP commands to MotorESP for each of the 4 big buttons.
+// Hold a button to run its motor; release to stop it.
+//
+// START commands: 0x01–0x04 (Motor 1–4)
+// STOP  commands: 0x11–0x14 (Motor 1–4)
 //
 // ButtonESP MAC : 68:fe:71:2b:75:d8
 // MotorESP  MAC : c0:cd:d6:81:ff:80
@@ -18,7 +21,8 @@ const int BTN_4 = 13;   // triggers Motor 4
 uint8_t motorEspMac[] = { 0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80 };
 
 // Packet: single byte command
-// 0x01 = Motor 1, 0x02 = Motor 2, 0x03 = Motor 3, 0x04 = Motor 4
+// START: 0x01 = Motor 1, 0x02 = Motor 2, 0x03 = Motor 3, 0x04 = Motor 4
+// STOP:  0x11 = Motor 1, 0x12 = Motor 2, 0x13 = Motor 3, 0x14 = Motor 4
 typedef struct {
   uint8_t command;
 } TriggerPacket;
@@ -36,14 +40,25 @@ void onDataSent(const wifi_tx_info_t *txInfo, esp_now_send_status_t status) {
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
 }
 
-void sendTrigger(uint8_t motorCmd) {
-  Serial.print("Button ");
-  Serial.print(motorCmd);
-  Serial.println(" pressed");
-  packet.command = motorCmd;
+void sendCommand(uint8_t cmd, const char *label) {
+  packet.command = cmd;
   esp_now_send(motorEspMac, (uint8_t *)&packet, sizeof(packet));
-  Serial.print("-> Sent trigger for Motor ");
-  Serial.println(motorCmd);
+  Serial.print("-> Sent ");
+  Serial.println(label);
+}
+
+void sendStart(uint8_t motorNum) {
+  Serial.print("Button ");
+  Serial.print(motorNum);
+  Serial.println(" held — START");
+  sendCommand(motorNum, "START");
+}
+
+void sendStop(uint8_t motorNum) {
+  Serial.print("Button ");
+  Serial.print(motorNum);
+  Serial.println(" released — STOP");
+  sendCommand(0x10 | motorNum, "STOP");
 }
 
 void setup() {
@@ -84,11 +99,17 @@ void loop() {
   bool currentBtn3 = digitalRead(BTN_3);
   bool currentBtn4 = digitalRead(BTN_4);
 
-  // Send on falling edge (press)
-  if (currentBtn1 == LOW && lastBtn1 == HIGH) sendTrigger(0x01);
-  if (currentBtn2 == LOW && lastBtn2 == HIGH) sendTrigger(0x02);
-  if (currentBtn3 == LOW && lastBtn3 == HIGH) sendTrigger(0x03);
-  if (currentBtn4 == LOW && lastBtn4 == HIGH) sendTrigger(0x04);
+  // Falling edge (press)  → START motor
+  if (currentBtn1 == LOW  && lastBtn1 == HIGH) sendStart(0x01);
+  if (currentBtn2 == LOW  && lastBtn2 == HIGH) sendStart(0x02);
+  if (currentBtn3 == LOW  && lastBtn3 == HIGH) sendStart(0x03);
+  if (currentBtn4 == LOW  && lastBtn4 == HIGH) sendStart(0x04);
+
+  // Rising edge (release) → STOP motor
+  if (currentBtn1 == HIGH && lastBtn1 == LOW)  sendStop(0x01);
+  if (currentBtn2 == HIGH && lastBtn2 == LOW)  sendStop(0x02);
+  if (currentBtn3 == HIGH && lastBtn3 == LOW)  sendStop(0x03);
+  if (currentBtn4 == HIGH && lastBtn4 == LOW)  sendStop(0x04);
 
   lastBtn1 = currentBtn1;
   lastBtn2 = currentBtn2;
