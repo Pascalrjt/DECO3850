@@ -318,6 +318,8 @@ class ProximityTracker:
                         self.destination_px = None
                         self.state = "SET_DESTINATION"
                         print("Click to set new destination")
+        except KeyboardInterrupt:
+            print("\nInterrupted — shutting down.")
         finally:
             self.send_motor_params(0, 0, 0, 0)
             time.sleep(0.1)
