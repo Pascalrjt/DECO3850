@@ -50,6 +50,15 @@ DEFAULT_HSV_LOWER = (5, 150, 100)
 DEFAULT_HSV_UPPER = (25, 255, 255)
 MIN_CONTOUR_AREA = 200
 
+# Interactive colour-picker defaults
+COLOR_PATCH_RADIUS = 5            # 11x11 patch around the click
+DEFAULT_H_TOL = 10
+DEFAULT_S_TOL = 60
+DEFAULT_V_TOL = 60
+MAX_H_TOL = 90
+MAX_SV_TOL = 127
+MASK_WINDOW_NAME = "Mask"
+
 
 def xor_checksum(data: bytes) -> int:
     chk = 0
@@ -87,15 +96,26 @@ def distance_to_motor_params(distance_mm: float, valid: bool):
 
 class ProximityTracker:
     def __init__(self, serial_port: str, baud: int, camera_id: int,
-                 hsv_lower, hsv_upper):
+                 hsv_lower, hsv_upper, h_tol: int, s_tol: int, v_tol: int,
+                 skip_color_pick: bool):
         self.serial_port = serial_port
         self.baud = baud
         self.camera_id = camera_id
         self.hsv_lower = np.array(hsv_lower, dtype=np.uint8)
         self.hsv_upper = np.array(hsv_upper, dtype=np.uint8)
+        self.hsv_ranges: list[tuple[np.ndarray, np.ndarray]] = [
+            (self.hsv_lower, self.hsv_upper)
+        ]
+
+        self.h_tol = int(h_tol)
+        self.s_tol = int(s_tol)
+        self.v_tol = int(v_tol)
+        self.sampled_hsv: tuple[int, int, int] | None = None
+        self.skip_color_pick = skip_color_pick
 
         self.ser: serial.Serial | None = None
         self.cap: cv2.VideoCapture | None = None
+        self._last_frame: np.ndarray | None = None
 
         self.corners_image: list[tuple[int, int]] = []
         self.homography: np.ndarray | None = None
@@ -105,7 +125,8 @@ class ProximityTracker:
         self.last_car_px: tuple[float, float] | None = None
         self.seq = 0
 
-        # CALIBRATING -> SET_DESTINATION -> TRACKING
+        # CALIBRATING -> PICK_COLOR -> SET_DESTINATION -> TRACKING
+        # (PICK_COLOR is skipped when explicit --hsv-lower/--hsv-upper are passed.)
         self.state = "CALIBRATING"
 
     # ------------------------------------------------------------------
@@ -141,8 +162,17 @@ class ProximityTracker:
             print(f"Corner {n}/4 ({labels[n-1]}): ({x}, {y})")
             if n == 4:
                 self._compute_homography()
-                self.state = "SET_DESTINATION"
-                print("Calibration done. Click inside the maze to set the destination.")
+                if self.skip_color_pick:
+                    self.state = "SET_DESTINATION"
+                    print("Calibration done. Click inside the maze to set the destination.")
+                else:
+                    self.state = "PICK_COLOR"
+                    print("Calibration done. Click the car to sample its colour.")
+
+        elif self.state == "PICK_COLOR":
+            self.sample_color_at(self._last_frame, x, y)
+            self.state = "SET_DESTINATION"
+            print("Click inside the maze to set the destination.")
 
         elif self.state == "SET_DESTINATION":
             pt = np.array([[[x, y]]], dtype=np.float32)
@@ -165,12 +195,92 @@ class ProximityTracker:
         print("Homography computed")
 
     # ------------------------------------------------------------------
+    # Interactive colour sampling
+    # ------------------------------------------------------------------
+    def sample_color_at(self, frame, x: int, y: int) -> None:
+        """Sample HSV around (x, y) and update detection bounds."""
+        if frame is None:
+            print("No frame available for colour sampling.")
+            return
+
+        h, w = frame.shape[:2]
+        r = COLOR_PATCH_RADIUS
+        x0 = max(0, x - r)
+        x1 = min(w, x + r + 1)
+        y0 = max(0, y - r)
+        y1 = min(h, y + r + 1)
+        patch = frame[y0:y1, x0:x1]
+        if patch.size == 0:
+            print("Sample patch is empty (clicked outside frame).")
+            return
+
+        hsv_patch = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        med = np.median(hsv_patch.reshape(-1, 3), axis=0)
+        self.sampled_hsv = (int(med[0]), int(med[1]), int(med[2]))
+        self._recompute_hsv_bounds()
+        print(f"Sampled HSV ~ {self.sampled_hsv}  ranges={self._format_ranges()}")
+
+    def _recompute_hsv_bounds(self) -> None:
+        """Rebuild self.hsv_ranges from the sampled centre + tolerances."""
+        if self.sampled_hsv is None:
+            return
+
+        h, s, v = self.sampled_hsv
+        s_lo = max(0, s - self.s_tol)
+        s_hi = min(255, s + self.s_tol)
+        v_lo = max(0, v - self.v_tol)
+        v_hi = min(255, v + self.v_tol)
+
+        h_lo_raw = h - self.h_tol
+        h_hi_raw = h + self.h_tol
+
+        ranges: list[tuple[np.ndarray, np.ndarray]] = []
+        if h_lo_raw < 0:
+            # Wrap: [0, h_hi] and [180 + h_lo, 179]
+            ranges.append((
+                np.array([0, s_lo, v_lo], dtype=np.uint8),
+                np.array([h_hi_raw, s_hi, v_hi], dtype=np.uint8),
+            ))
+            ranges.append((
+                np.array([180 + h_lo_raw, s_lo, v_lo], dtype=np.uint8),
+                np.array([179, s_hi, v_hi], dtype=np.uint8),
+            ))
+        elif h_hi_raw > 179:
+            ranges.append((
+                np.array([h_lo_raw, s_lo, v_lo], dtype=np.uint8),
+                np.array([179, s_hi, v_hi], dtype=np.uint8),
+            ))
+            ranges.append((
+                np.array([0, s_lo, v_lo], dtype=np.uint8),
+                np.array([h_hi_raw - 180, s_hi, v_hi], dtype=np.uint8),
+            ))
+        else:
+            ranges.append((
+                np.array([h_lo_raw, s_lo, v_lo], dtype=np.uint8),
+                np.array([h_hi_raw, s_hi, v_hi], dtype=np.uint8),
+            ))
+
+        self.hsv_ranges = ranges
+        self.hsv_lower, self.hsv_upper = ranges[0]
+
+    def _format_ranges(self) -> str:
+        return ", ".join(
+            f"[{tuple(int(x) for x in lo)}-{tuple(int(x) for x in hi)}]"
+            for lo, hi in self.hsv_ranges
+        )
+
+    # ------------------------------------------------------------------
     # Arrow detection
     # ------------------------------------------------------------------
     def detect_arrow(self, frame):
         """Return (centroid_px, mask) or (None, mask)."""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.hsv_lower, self.hsv_upper)
+        mask = None
+        for lo, hi in self.hsv_ranges:
+            m = cv2.inRange(hsv, lo, hi)
+            mask = m if mask is None else cv2.bitwise_or(mask, m)
+        if mask is None:
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -248,6 +358,8 @@ class ProximityTracker:
 
         if self.state == "CALIBRATING":
             text = f"Click maze corners ({len(self.corners_image)}/4): TL, TR, BR, BL"
+        elif self.state == "PICK_COLOR":
+            text = "Click the car to sample its colour"
         elif self.state == "SET_DESTINATION":
             text = "Click to set destination"
         elif valid and distance_mm is not None:
@@ -257,9 +369,25 @@ class ProximityTracker:
 
         cv2.putText(frame, text, (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(frame, "[R] reset cal   [D] new dest   [Q] quit",
+        cv2.putText(frame,
+                    "[R] reset cal   [C] re-pick colour   [D] new dest   [Q] quit",
                     (10, frame.shape[0] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
+    # ------------------------------------------------------------------
+    # Trackbar callbacks
+    # ------------------------------------------------------------------
+    def _on_h_tol(self, value: int) -> None:
+        self.h_tol = int(value)
+        self._recompute_hsv_bounds()
+
+    def _on_s_tol(self, value: int) -> None:
+        self.s_tol = int(value)
+        self._recompute_hsv_bounds()
+
+    def _on_v_tol(self, value: int) -> None:
+        self.v_tol = int(value)
+        self._recompute_hsv_bounds()
 
     # ------------------------------------------------------------------
     # Main loop
@@ -268,8 +396,28 @@ class ProximityTracker:
         self.open_camera()
         self.connect_serial()
 
+        # Create the Mask window (with trackbars) FIRST so that Maze Tracker,
+        # created after, comes to the front of the cocoa window stack on macOS.
+        cv2.namedWindow(MASK_WINDOW_NAME, cv2.WINDOW_NORMAL)
+        cv2.createTrackbar("H tol", MASK_WINDOW_NAME, self.h_tol, MAX_H_TOL,
+                           self._on_h_tol)
+        cv2.createTrackbar("S tol", MASK_WINDOW_NAME, self.s_tol, MAX_SV_TOL,
+                           self._on_s_tol)
+        cv2.createTrackbar("V tol", MASK_WINDOW_NAME, self.v_tol, MAX_SV_TOL,
+                           self._on_v_tol)
+
         cv2.namedWindow("Maze Tracker")
         cv2.setMouseCallback("Maze Tracker", self.on_mouse)
+
+        cv2.moveWindow("Maze Tracker", 50, 50)
+        cv2.moveWindow(MASK_WINDOW_NAME, 800, 50)
+
+        # Prime both windows so cocoa actually renders them before the first
+        # cap.read() (works around AUTOSIZE+trackbar quirks).
+        placeholder = np.zeros((360, 640, 3), dtype=np.uint8)
+        cv2.imshow("Maze Tracker", placeholder)
+        cv2.imshow(MASK_WINDOW_NAME, placeholder[:, :, 0])
+        cv2.waitKey(1)
 
         last_send = 0.0
         send_interval = 0.05  # 20 Hz
@@ -279,13 +427,15 @@ class ProximityTracker:
                 ret, frame = self.cap.read()
                 if not ret:
                     break
+                self._last_frame = frame
 
                 car_px = None
                 distance_mm = None
                 valid = False
+                mask = None
 
                 if self.state == "TRACKING":
-                    car_px, _mask = self.detect_arrow(frame)
+                    car_px, mask = self.detect_arrow(frame)
                     if car_px is not None:
                         car_mm = self.pixel_to_maze_mm(car_px[0], car_px[1])
                         distance_mm = self.compute_distance(car_mm)
@@ -298,6 +448,13 @@ class ProximityTracker:
                         s, on, off, f = distance_to_motor_params(
                             distance_mm if valid else 0, valid)
                         self.send_motor_params(s, on, off, f)
+                elif self.sampled_hsv is not None:
+                    # Preview the mask live while the user adjusts tolerances.
+                    _, mask = self.detect_arrow(frame)
+
+                if mask is None:
+                    mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+                cv2.imshow(MASK_WINDOW_NAME, mask)
 
                 self.draw_overlay(frame, car_px, distance_mm, valid)
                 cv2.imshow("Maze Tracker", frame)
@@ -310,6 +467,7 @@ class ProximityTracker:
                     self.homography = None
                     self.destination_mm = None
                     self.destination_px = None
+                    self.sampled_hsv = None
                     self.state = "CALIBRATING"
                     print("Calibration reset")
                 elif key == ord("d"):
@@ -318,6 +476,10 @@ class ProximityTracker:
                         self.destination_px = None
                         self.state = "SET_DESTINATION"
                         print("Click to set new destination")
+                elif key == ord("c"):
+                    if self.homography is not None:
+                        self.state = "PICK_COLOR"
+                        print("Click the car to sample its colour.")
         except KeyboardInterrupt:
             print("\nInterrupted — shutting down.")
         finally:
@@ -338,20 +500,32 @@ def main():
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--camera", type=int, default=0,
                         help="Camera device index")
-    parser.add_argument("--hsv-lower", type=int, nargs=3,
-                        default=list(DEFAULT_HSV_LOWER),
-                        help="HSV lower bound (H S V)")
-    parser.add_argument("--hsv-upper", type=int, nargs=3,
-                        default=list(DEFAULT_HSV_UPPER),
-                        help="HSV upper bound (H S V)")
+    parser.add_argument("--hsv-lower", type=int, nargs=3, default=None,
+                        help="HSV lower bound (H S V) — skips interactive pick")
+    parser.add_argument("--hsv-upper", type=int, nargs=3, default=None,
+                        help="HSV upper bound (H S V) — skips interactive pick")
+    parser.add_argument("--h-tol", type=int, default=DEFAULT_H_TOL,
+                        help="Initial hue tolerance for interactive picker")
+    parser.add_argument("--s-tol", type=int, default=DEFAULT_S_TOL,
+                        help="Initial saturation tolerance for interactive picker")
+    parser.add_argument("--v-tol", type=int, default=DEFAULT_V_TOL,
+                        help="Initial value tolerance for interactive picker")
     args = parser.parse_args()
+
+    explicit_hsv = args.hsv_lower is not None or args.hsv_upper is not None
+    hsv_lower = tuple(args.hsv_lower) if args.hsv_lower is not None else DEFAULT_HSV_LOWER
+    hsv_upper = tuple(args.hsv_upper) if args.hsv_upper is not None else DEFAULT_HSV_UPPER
 
     tracker = ProximityTracker(
         serial_port=args.port,
         baud=args.baud,
         camera_id=args.camera,
-        hsv_lower=tuple(args.hsv_lower),
-        hsv_upper=tuple(args.hsv_upper),
+        hsv_lower=hsv_lower,
+        hsv_upper=hsv_upper,
+        h_tol=args.h_tol,
+        s_tol=args.s_tol,
+        v_tol=args.v_tol,
+        skip_color_pick=explicit_hsv,
     )
     tracker.run()
 
