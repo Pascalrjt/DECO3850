@@ -14,19 +14,19 @@ const int HAPTIC_PWM_LEVEL = 10;
 const int PROX_PWM_PIN = 27;
 const int PROX_DIR_PIN = 33;
 
-const uint8_t LOCAL_MAC[6] = {0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48};
-const uint8_t CAR_MAC[6] = {0x14, 0x33, 0x5C, 0x61, 0x11, 0x40};
+const uint8_t LOCAL_MAC[6] = { 0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48 };
+const uint8_t CAR_MAC[6] = { 0x14, 0x33, 0x5C, 0x61, 0x11, 0x40 };
 // TODO: replace with the actual MAC printed by the bridge at startup
-const uint8_t BRIDGE_MAC[6] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+const uint8_t BRIDGE_MAC[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 const uint8_t ESPNOW_CHANNEL = 6;
 
 const int ADC_MAX = 4095;
 const int STEER_DEADZONE = 120;
+const int THROTTLE_DEADZONE = 400;
 const int CALIBRATION_SAMPLES = 100;
 const int COMMAND_SCALE = 1000;
-const int BRAKE_RELEASE_RAW = 4095;
+const int BRAKE_DEADZONE = 400;
 const int BRAKE_FULL_PRESS_RAW = 1600;
-const int BRAKE_RELEASE_BAND = 40;
 const int BRAKE_FULL_PRESS_BAND = 40;
 const float BRAKE_RELEASE_LEVEL = 0.05f;
 const float BRAKE_ARM_LEVEL = 0.95f;
@@ -65,6 +65,8 @@ struct __attribute__((packed)) ProximityPacket {
 const uint8_t PROX_FLAG_VALID = 0x01;
 
 int steerCenter = 0;
+int throttleRest = 0;
+int brakeRest = 0;
 bool reverseArmed = false;
 unsigned long brakeHoldStart = 0;
 unsigned long lastSendTime = 0;
@@ -132,19 +134,23 @@ float normalizeCentered(int raw, int center, bool invert) {
   return clampFloat((offset > 0 ? 1.0f : -1.0f) * magnitude, -1.0f, 1.0f);
 }
 
-float normalizeRange(int raw, bool invert) {
-  float normalized = raw / (float)ADC_MAX;
-  if (invert) {
-    normalized = 1.0f - normalized;
+float normalizeThrottle(int raw, int rest, bool invert) {
+  int offset = invert ? (rest - raw) : (raw - rest);
+  if (offset <= THROTTLE_DEADZONE) {
+    return 0.0f;
   }
 
-  if (normalized < 0.02f) normalized = 0.0f;
-  if (normalized > 0.98f) normalized = 1.0f;
-  return clampFloat(normalized, 0.0f, 1.0f);
+  int span = invert ? rest : (ADC_MAX - rest);
+  if (span <= THROTTLE_DEADZONE) {
+    return 0.0f;
+  }
+
+  return clampFloat((offset - THROTTLE_DEADZONE) / (float)(span - THROTTLE_DEADZONE), 0.0f, 1.0f);
 }
 
-float normalizeBrake(int raw) {
-  if (raw >= BRAKE_RELEASE_RAW - BRAKE_RELEASE_BAND) {
+float normalizeBrake(int raw, int rest) {
+  int offset = rest - raw;
+  if (offset <= BRAKE_DEADZONE) {
     return 0.0f;
   }
 
@@ -152,8 +158,12 @@ float normalizeBrake(int raw) {
     return 1.0f;
   }
 
-  float normalized = (BRAKE_RELEASE_RAW - raw) / (float)(BRAKE_RELEASE_RAW - BRAKE_FULL_PRESS_RAW);
-  return clampFloat(normalized, 0.0f, 1.0f);
+  int span = (rest - BRAKE_DEADZONE) - (BRAKE_FULL_PRESS_RAW + BRAKE_FULL_PRESS_BAND);
+  if (span <= 0) {
+    return 0.0f;
+  }
+
+  return clampFloat((offset - BRAKE_DEADZONE) / (float)span, 0.0f, 1.0f);
 }
 
 int16_t scaledSignedCommand(float normalized) {
@@ -271,6 +281,34 @@ void calibrateSteeringCenter() {
   Serial.println(steerCenter);
 }
 
+void calibrateThrottleRest() {
+  Serial.println("Calibrating throttle rest - leave the throttle pot untouched...");
+
+  long total = 0;
+  for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
+    total += analogRead(POT_THROTTLE_PIN);
+    delay(10);
+  }
+
+  throttleRest = total / CALIBRATION_SAMPLES;
+  Serial.print("Throttle rest: ");
+  Serial.println(throttleRest);
+}
+
+void calibrateBrakeRest() {
+  Serial.println("Calibrating brake rest - leave the brake pot released...");
+
+  long total = 0;
+  for (int i = 0; i < CALIBRATION_SAMPLES; i++) {
+    total += analogRead(POT_BRAKE_PIN);
+    delay(10);
+  }
+
+  brakeRest = total / CALIBRATION_SAMPLES;
+  Serial.print("Brake rest: ");
+  Serial.println(brakeRest);
+}
+
 void setup() {
   Serial.begin(115200);
   analogReadResolution(12);
@@ -288,6 +326,8 @@ void setup() {
 
   setupEspNow();
   calibrateSteeringCenter();
+  calibrateThrottleRest();
+  calibrateBrakeRest();
 
   Serial.println("Pot controller transmitter (haptic + proximity) ready");
 }
@@ -299,8 +339,8 @@ void loop() {
   int rawBrake = analogRead(POT_BRAKE_PIN);
 
   float steer = normalizeCentered(rawSteer, steerCenter, INVERT_STEERING);
-  float throttle = normalizeRange(rawThrottle, INVERT_THROTTLE);
-  float brake = normalizeBrake(rawBrake);
+  float throttle = normalizeThrottle(rawThrottle, throttleRest, INVERT_THROTTLE);
+  float brake = normalizeBrake(rawBrake, brakeRest);
 
   if (brake <= BRAKE_RELEASE_LEVEL) {
     reverseArmed = false;
@@ -415,6 +455,8 @@ void loop() {
     Serial.print(rawSteer);
     Serial.print("  ThrottleRaw: ");
     Serial.print(rawThrottle);
+    Serial.print("  ThrottleNorm: ");
+    Serial.print(throttle, 2);
     Serial.print("  BrakeRaw: ");
     Serial.print(rawBrake);
     Serial.print("  BrakeNorm: ");
