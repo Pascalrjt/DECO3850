@@ -2,7 +2,7 @@
 #include <esp_now.h>
 
 // --- Target: pot controller ---
-const uint8_t CONTROLLER_MAC[6] = {0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48};
+const uint8_t CONTROLLER_MAC[6] = {0x68, 0xFE, 0x71, 0x2B, 0x75, 0xD8};
 const uint8_t ESPNOW_CHANNEL = 6;
 
 // --- Serial framing ---

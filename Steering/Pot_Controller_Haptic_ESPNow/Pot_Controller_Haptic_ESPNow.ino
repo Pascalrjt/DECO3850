@@ -5,16 +5,18 @@ const int POT_STEER_PIN = 34;
 const int POT_THROTTLE_PIN = 35;
 const int POT_BRAKE_PIN = 32;
 
-// Wall haptic motor (DFRobot dual driver M1 channel)
-const int HAPTIC_PWM_PIN = 25;
-const int HAPTIC_DIR_PIN = 26;
+// Wall haptic motors (two motors, driven together)
+const int HAPTIC_A_DIR_PIN = 19;
+const int HAPTIC_A_PWM_PIN = 23;
+const int HAPTIC_B_DIR_PIN = 27;
+const int HAPTIC_B_PWM_PIN = 13;
 const int HAPTIC_PWM_LEVEL = 10;
 
-// Proximity haptic motor (DFRobot dual driver M2 channel)
-const int PROX_PWM_PIN = 27;
-const int PROX_DIR_PIN = 33;
+// Proximity haptic motor
+const int PROX_PWM_PIN = 25;
+const int PROX_DIR_PIN = 26;
 
-const uint8_t LOCAL_MAC[6] = { 0x14, 0x33, 0x5C, 0x25, 0x5B, 0x48 };
+const uint8_t LOCAL_MAC[6] = { 0x68, 0xFE, 0x71, 0x2B, 0x75, 0xD8 };
 const uint8_t CAR_MAC[6] = { 0x14, 0x33, 0x5C, 0x61, 0x11, 0x40 };
 // TODO: replace with the actual MAC printed by the bridge at startup
 const uint8_t BRIDGE_MAC[6] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
@@ -174,6 +176,16 @@ uint16_t scaledUnsignedCommand(float normalized) {
   return (uint16_t)lroundf(clampFloat(normalized, 0.0f, 1.0f) * COMMAND_SCALE);
 }
 
+void writeWallMotor(int dirPin, int pwmPin, bool on) {
+  if (on) {
+    digitalWrite(dirPin, HIGH);
+    analogWrite(pwmPin, HAPTIC_PWM_LEVEL);
+  } else {
+    analogWrite(pwmPin, 0);
+    digitalWrite(dirPin, LOW);
+  }
+}
+
 void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int dataLen) {
   if (dataLen == sizeof(FeedbackPacket) && macsEqual(info->src_addr, CAR_MAC)) {
     FeedbackPacket fb;
@@ -314,10 +326,14 @@ void setup() {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
 
-  pinMode(HAPTIC_PWM_PIN, OUTPUT);
-  pinMode(HAPTIC_DIR_PIN, OUTPUT);
-  digitalWrite(HAPTIC_DIR_PIN, LOW);
-  digitalWrite(HAPTIC_PWM_PIN, LOW);
+  pinMode(HAPTIC_A_DIR_PIN, OUTPUT);
+  pinMode(HAPTIC_A_PWM_PIN, OUTPUT);
+  pinMode(HAPTIC_B_DIR_PIN, OUTPUT);
+  pinMode(HAPTIC_B_PWM_PIN, OUTPUT);
+  digitalWrite(HAPTIC_A_DIR_PIN, LOW);
+  digitalWrite(HAPTIC_A_PWM_PIN, LOW);
+  digitalWrite(HAPTIC_B_DIR_PIN, LOW);
+  digitalWrite(HAPTIC_B_PWM_PIN, LOW);
 
   pinMode(PROX_PWM_PIN, OUTPUT);
   pinMode(PROX_DIR_PIN, OUTPUT);
@@ -386,12 +402,12 @@ void loop() {
   bool wantWallMotor = fbValid && fbAge <= FEEDBACK_TIMEOUT_MS && fb.deflected == 1;
 
   if (wantWallMotor && !wallMotorOn) {
-    digitalWrite(HAPTIC_DIR_PIN, HIGH);
-    analogWrite(HAPTIC_PWM_PIN, HAPTIC_PWM_LEVEL);
+    writeWallMotor(HAPTIC_A_DIR_PIN, HAPTIC_A_PWM_PIN, true);
+    writeWallMotor(HAPTIC_B_DIR_PIN, HAPTIC_B_PWM_PIN, true);
     wallMotorOn = true;
   } else if (!wantWallMotor && wallMotorOn) {
-    analogWrite(HAPTIC_PWM_PIN, 0);
-    digitalWrite(HAPTIC_DIR_PIN, LOW);
+    writeWallMotor(HAPTIC_A_DIR_PIN, HAPTIC_A_PWM_PIN, false);
+    writeWallMotor(HAPTIC_B_DIR_PIN, HAPTIC_B_PWM_PIN, false);
     wallMotorOn = false;
   }
 

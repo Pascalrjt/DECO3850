@@ -36,7 +36,7 @@ Notes:
 
 Board role:
 - Handheld transmitter
-- MAC: `14:33:5C:25:5B:48`
+- MAC: `68:FE:71:2B:75:D8`
 - Sketch: `Steering/Pot_Controller_Haptic_ESPNow/Pot_Controller_Haptic_ESPNow.ino` (with haptic feedback)
 - Legacy sketch (no haptic): `Steering/Pot_Controller_ESPNow/Pot_Controller_ESPNow.ino`
 
@@ -50,19 +50,21 @@ Board role:
 - Other outer pin -> `GND`
 - Pot center pin / wiper -> assigned GPIO above
 
-### Haptic Motor Driver (DFRobot dual driver)
+### Haptic Motor Drivers
 
-#### Wall feedback — M1 channel
-- `GPIO 25` -> `M1_PWM`
-- `GPIO 26` -> `M1_DIR`
-- Motor wires -> driver `M1+` / `M1-` terminals
+Three vibration motors total — two for wall feedback, one for proximity. A single DFRobot dual driver only exposes two channels (M1/M2), so this build needs **two dual drivers** (one channel left spare) or a quad driver.
 
-#### Proximity feedback — M2 channel
-- `GPIO 27` -> `M2_PWM`
-- `GPIO 33` -> `M2_DIR`
-- Motor wires -> driver `M2+` / `M2-` terminals
+#### Wall feedback — two motors (driven together)
+- Motor A: `GPIO 23` -> `PWM`, `GPIO 19` -> `DIR`
+- Motor B: `GPIO 13` -> `PWM`, `GPIO 27` -> `DIR`
+- Each motor's wires -> a driver channel's `+` / `-` terminals
 
-#### Driver power
+#### Proximity feedback — one motor
+- `GPIO 25` -> `PWM`
+- `GPIO 26` -> `DIR`
+- Motor wires -> a driver channel's `+` / `-` terminals
+
+#### Driver power (wire for each driver)
 - Driver `GND` -> ESP32 `GND` (common ground)
 - Driver `VCC` -> `5V` (logic supply, can share USB 5V)
 - Driver `VM` -> external motor power supply positive (6-12V typical)
@@ -71,8 +73,9 @@ Board role:
 Notes:
 - `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
 - The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
-- The wall haptic motor (M1) runs while the car-side joystick is deflected and stops immediately when the joystick returns to center or the feedback link times out.
-- The proximity haptic motor (M2) pulses at a rate and strength dictated by `ProximityPacket` messages from the bridge ESP32. Faster pulses mean the car is closer to the destination.
+- The two wall haptic motors run together while the car-side joystick is deflected and stop immediately when the joystick returns to center or the feedback link times out.
+- The proximity haptic motor pulses at a rate and strength dictated by `ProximityPacket` messages from the bridge ESP32. Faster pulses mean the car is closer to the destination.
+- The haptic GPIOs (13/19/23/25/26/27) are all general-purpose pins with no ESP32 boot-strapping role, so a driver input cannot block start-up. Avoid `GPIO 12` for these — it selects flash voltage at boot, and a driver holding it high can stop the board from booting.
 
 ## Bridge ESP32 Pinout
 
@@ -136,7 +139,7 @@ Notes:
 
 Board role:
 - Button transmitter (ESP-NOW sender)
-- MAC: `68:fe:71:2b:75:d8`
+- MAC: `TBD`
 - Sketch: `Vibration/buttonTrigger/buttonTrigger.ino`
 
 ### Buttons
