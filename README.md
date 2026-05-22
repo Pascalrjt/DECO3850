@@ -81,10 +81,12 @@ Notes:
 
 Board role:
 - USB-serial to ESP-NOW bridge for proximity data
-- MAC: update `BRIDGE_MAC` in the controller sketch with the value printed at bridge startup
+- MAC: `68:FE:71:2C:0B:C8`
 - Sketch: `Bridge/ProximityBridge_ESPNow/ProximityBridge_ESPNow.ino`
 
 No additional GPIO wiring — the bridge only uses USB serial for data input and ESP-NOW for output. Connect it to the PC running `Vision/proximity_tracker.py` via USB.
+
+This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic_ESPNow.ino`) so the controller can register the bridge as an ESP-NOW peer.
 
 ## Wireless Link
 
