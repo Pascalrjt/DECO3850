@@ -139,7 +139,7 @@ Notes:
 
 Board role:
 - Button transmitter (ESP-NOW sender)
-- MAC: `TBD`
+- MAC: `68:FE:71:2C:78:BC`
 - Sketch: `Vibration/buttonTrigger/buttonTrigger.ino`
 
 ### Buttons
