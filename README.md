@@ -134,8 +134,8 @@ Board role:
 
 Notes:
 - All four motors are triggered wirelessly by ButtonESP over ESP-NOW.
-- Each motor runs for 1000ms per trigger and stops automatically.
-- If a motor is already running, a second trigger for the same motor is ignored until it stops.
+- Each motor runs while its button is held and stops when the button is released — START on the press edge, STOP on the release edge.
+- Motor output is a fixed `analogWrite(pwm, 150)` with `DIR` held HIGH; there is no on-board timeout, so the motor only stops when a STOP command arrives.
 
 ## ButtonESP Pinout
 
@@ -152,12 +152,14 @@ Board role:
 
 Notes:
 - All buttons use `INPUT_PULLUP`; connect one side to the GPIO and the other to `GND`.
-- A press sends a one-byte command to MotorESP on the falling edge only.
+- The falling edge (press) sends a START byte (`0x01`–`0x04`) and the rising edge (release) sends the matching STOP byte (`0x11`–`0x14`), so the motor is active for exactly as long as the button is held.
+- The loop polls every 10 ms with edge detection against the previous reading — no debouncing beyond that delay.
 
 ## Vibration Wireless Link
 
 - Protocol: `ESP-NOW`
-- ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button press.
-- Command byte mapping: `0x01` = Motor 1, `0x02` = Motor 2, `0x03` = Motor 3, `0x04` = Motor 4.
-- MotorESP starts the corresponding motor on receipt and stops it automatically after 1000ms.
+- ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button edge — one packet on press, one on release.
+- START command byte mapping: `0x01` = Motor 1, `0x02` = Motor 2, `0x03` = Motor 3, `0x04` = Motor 4.
+- STOP command byte mapping: `0x11` = Motor 1, `0x12` = Motor 2, `0x13` = Motor 3, `0x14` = Motor 4 (high nibble `0x10` is OR-ed onto the motor id).
+- MotorESP runs the matching motor on START and stops it on STOP; there is no automatic timeout, so a lost STOP packet will leave the motor running until the next STOP arrives.
 
