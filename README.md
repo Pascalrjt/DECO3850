@@ -107,6 +107,34 @@ This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic
 - A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean distance to the destination is converted to motor parameters (strength and pulse rate).
 - Motor parameters are sent as framed binary packets over USB serial to the bridge ESP32, which rebroadcasts them via ESP-NOW.
 
+### Running the tracker
+
+Default invocation (uses the macOS default port `/dev/cu.usbserial-10`):
+
+```
+python3 Vision/proximity_tracker.py
+```
+
+If the serial port cannot be opened the script prints `Serial connection failed` and continues in vision-only mode — calibration and tracking still work but no packets reach the bridge, so the proximity haptic motor will stay silent.
+
+### CLI flags
+
+- `--port <path>` — serial port for the bridge ESP32. Default `/dev/cu.usbserial-10` (macOS). Use `ls /dev/cu.usbserial-*` to confirm the device name, or `/dev/ttyUSB0` on Linux.
+- `--baud <int>` — serial baud rate. Default `115200` (must match the bridge sketch).
+- `--camera <int>` — camera device index passed to OpenCV. Default `0`.
+- `--hsv-lower H S V` — HSV lower bound for arrow detection. Passing this (or `--hsv-upper`) skips the interactive colour picker.
+- `--hsv-upper H S V` — HSV upper bound for arrow detection.
+- `--h-tol <int>` — initial hue tolerance for the interactive picker. Default `10`.
+- `--s-tol <int>` — initial saturation tolerance for the interactive picker. Default `60`.
+- `--v-tol <int>` — initial value tolerance for the interactive picker. Default `60`.
+
+### Runtime keys
+
+- `R` — reset calibration (re-click the four corners).
+- `C` — re-pick the car colour.
+- `D` — set a new destination.
+- `Q` — quit.
+
 ## Legacy Joystick Test Pinout
 
 The older test sketch at `MazeRoomba/Stepper-test/Joystick/Joystick.ino` used `GPIO 39` / `GPIO 36` for the joystick. The RC car now uses `GPIO 35` / `GPIO 34` for the same joystick module (see the Joystick subsection above).

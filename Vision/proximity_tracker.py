@@ -495,7 +495,7 @@ class ProximityTracker:
 def main():
     parser = argparse.ArgumentParser(
         description="Maze proximity tracker — streams haptic motor params to bridge ESP32")
-    parser.add_argument("--port", default="/dev/ttyUSB0",
+    parser.add_argument("--port", default="/dev/cu.usbserial-10",
                         help="Serial port for the bridge ESP32")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--camera", type=int, default=0,
