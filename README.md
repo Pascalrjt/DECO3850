@@ -74,7 +74,7 @@ Notes:
 - `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
 - The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
 - The two wall haptic motors run together while the car-side joystick is deflected and stop immediately when the joystick returns to center or the feedback link times out.
-- The proximity haptic motor pulses at a rate and strength dictated by `ProximityPacket` messages from the bridge ESP32. Faster pulses mean the car is closer to the destination.
+- The proximity haptic motor pulses according to `ProximityPacket` messages from the bridge ESP32. Distance is quantised into 200 mm buckets and each bucket fires a fixed 100 ms pulse at full PWM (255); only the gap between pulses changes. Faster pulses mean the car is closer to the destination — see the table under [Proximity Tracking (PC-side)](#proximity-tracking-pc-side).
 - The haptic GPIOs (13/19/23/25/26/27) are all general-purpose pins with no ESP32 boot-strapping role, so a driver input cannot block start-up. Avoid `GPIO 12` for these — it selects flash voltage at boot, and a driver holding it high can stop the board from booting.
 
 ## Bridge ESP32 Pinout
@@ -104,8 +104,22 @@ This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic
 - Script: `Vision/proximity_tracker.py`
 - Dependencies: `Vision/requirements.txt` (`pip install -r Vision/requirements.txt`)
 - An overhead webcam views the 1.2 m × 1.2 m maze. The overseer calibrates four maze corners (click TL, TR, BR, BL) and clicks to set the destination.
-- A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean distance to the destination is converted to motor parameters (strength and pulse rate).
+- A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean distance to the destination is bucketed into 200 mm steps to drive the haptic motor.
 - Motor parameters are sent as framed binary packets over USB serial to the bridge ESP32, which rebroadcasts them via ESP-NOW.
+
+### Distance → haptic mapping
+
+All pulses fire at PWM `255` with a `100 ms` pulse width; only `pulse_off` (the gap between pulses) changes between buckets. Below the arrival threshold the motor is held solid-on. Tuneables live in `Vision/proximity_tracker.py` (`PROX_STRENGTH`, `PROX_PULSE_ON_MS`, `PROX_DISTANCE_BUCKETS`).
+
+| Distance (mm) | `pulse_on` | `pulse_off` | Rate |
+| --- | --- | --- | --- |
+| < 50 (arrived) | 500 ms | 0 ms | solid on |
+| 50–200 | 100 ms | 100 ms | ~5.0 Hz |
+| 200–400 | 100 ms | 220 ms | ~3.1 Hz |
+| 400–600 | 100 ms | 400 ms | ~2.0 Hz |
+| 600–800 | 100 ms | 700 ms | ~1.25 Hz |
+| 800–1000 | 100 ms | 1150 ms | ~0.8 Hz |
+| 1000–1200 | 100 ms | 1900 ms | ~0.5 Hz |
 
 ### Running the tracker
 

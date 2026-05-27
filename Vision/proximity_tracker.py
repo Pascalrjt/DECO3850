@@ -43,6 +43,20 @@ MAZE_HEIGHT_MM = 1200
 MAX_DISTANCE_MM = 1200.0
 ARRIVAL_THRESHOLD_MM = 50.0
 
+PROX_STRENGTH = 255
+PROX_PULSE_ON_MS = 100
+PROX_ARRIVAL_PULSE_ON_MS = 500
+
+# (upper_bound_mm, pulse_off_ms) — 200 mm buckets, closer = faster cadence.
+PROX_DISTANCE_BUCKETS = (
+    (200, 100),     # 50-200 mm     ~5.0 Hz
+    (400, 220),     # 200-400 mm    ~3.1 Hz
+    (600, 400),     # 400-600 mm    ~2.0 Hz
+    (800, 700),     # 600-800 mm    ~1.25 Hz
+    (1000, 1150),   # 800-1000 mm   ~0.8 Hz
+    (1200, 1900),   # 1000-1200 mm  ~0.5 Hz
+)
+
 # ---------------------------------------------------------------------------
 # Arrow detection defaults (bright saturated colour on neutral roof)
 # ---------------------------------------------------------------------------
@@ -81,17 +95,13 @@ def distance_to_motor_params(distance_mm: float, valid: bool):
     d = max(0.0, min(distance_mm, MAX_DISTANCE_MM))
 
     if d < ARRIVAL_THRESHOLD_MM:
-        return 200, 500, 0, FLAG_VALID
+        return PROX_STRENGTH, PROX_ARRIVAL_PULSE_ON_MS, 0, FLAG_VALID
 
-    t = (d - ARRIVAL_THRESHOLD_MM) / (MAX_DISTANCE_MM - ARRIVAL_THRESHOLD_MM)
-    t = max(0.0, min(1.0, t))
+    for upper_mm, pulse_off in PROX_DISTANCE_BUCKETS:
+        if d <= upper_mm:
+            return PROX_STRENGTH, PROX_PULSE_ON_MS, pulse_off, FLAG_VALID
 
-    strength = int(80 + (1.0 - t) * 120)
-    hz = 1.0 + (1.0 - t) * 7.0
-    pulse_on = 60
-    pulse_off = max(0, int(1000.0 / hz - pulse_on))
-
-    return strength, pulse_on, pulse_off, FLAG_VALID
+    return PROX_STRENGTH, PROX_PULSE_ON_MS, PROX_DISTANCE_BUCKETS[-1][1], FLAG_VALID
 
 
 class ProximityTracker:
