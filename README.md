@@ -1,5 +1,12 @@
 # MazeRoomba
 
+## Wiring Diagrams
+
+Colour-coded wiring diagrams for all five boards are in `wiring-diagrams/`. Open them in a browser.
+
+- `wiring-diagrams/index-motoresp-wall-haptics.html` matches the current code: wall haptics on the MotorESP, one driver on the controller.
+- `wiring-diagrams/index.html` shows the earlier design, with the two wall motors on the controller.
+
 ## RC Car ESP32 Pinout
 
 Board role:
