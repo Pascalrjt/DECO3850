@@ -5,9 +5,9 @@
 //                 motors pulse together (wall haptic feedback).
 // A held button takes priority over the wall pulse for its own motor.
 //
-// MotorESP  MAC : c0:cd:d6:81:ff:80
-// ButtonESP MAC : 68:FE:71:2C:78:BC
-// RC car    MAC : 14:33:5C:61:11:40
+// MotorESP  MAC : 68:fe:71:2c:78:bc
+// ButtonESP MAC : C0:CD:D6:81:FF:80
+// RC car    MAC : 68:FE:71:2C:0B:C8
 //
 // ButtonESP command byte -> action
 //   0x01–0x04 -> START Motor 1–4 (repeated every 100 ms while the button is held)
@@ -27,8 +27,8 @@ const int MOTOR_PWM[NUM_MOTORS] = { 25, 17, 5, 23 };
 const int MOTOR_DIR[NUM_MOTORS] = { 26, 27, 13, 19 };
 
 // Only these two senders are obeyed; packets from any other board are counted and ignored
-const uint8_t CAR_MAC[6] = { 0x14, 0x33, 0x5C, 0x61, 0x11, 0x40 };
-const uint8_t BUTTON_ESP_MAC[6] = { 0x68, 0xFE, 0x71, 0x2C, 0x78, 0xBC };
+const uint8_t CAR_MAC[6] = { 0x68, 0xFE, 0x71, 0x2C, 0x0B, 0xC8 };
+const uint8_t BUTTON_ESP_MAC[6] = { 0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80 };
 const uint8_t ESPNOW_CHANNEL = 6;
 
 const int BUTTON_PWM_LEVEL = 150;

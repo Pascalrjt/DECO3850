@@ -9,8 +9,8 @@
 // stays held. MotorESP stops a motor when the repeats stop arriving, so a lost
 // packet in either direction corrects itself within a fraction of a second.
 //
-// ButtonESP MAC : 68:FE:71:2C:78:BC
-// MotorESP  MAC : c0:cd:d6:81:ff:80
+// ButtonESP MAC : C0:CD:D6:81:FF:80
+// MotorESP  MAC : 68:fe:71:2c:78:bc
 
 #include <esp_now.h>
 #include <WiFi.h>
@@ -21,7 +21,7 @@ const int NUM_BUTTONS = 4;
 const int BTN_PINS[NUM_BUTTONS] = { 27, 14, 12, 13 };
 
 // MotorESP MAC address
-uint8_t motorEspMac[] = { 0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80 };
+uint8_t motorEspMac[] = { 0x68, 0xFE, 0x71, 0x2C, 0x78, 0xBC };
 
 // Must match MotorESP, which shares channel 6 with the RC car
 const uint8_t ESPNOW_CHANNEL = 6;

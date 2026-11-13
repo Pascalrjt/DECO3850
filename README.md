@@ -11,7 +11,7 @@ Colour-coded wiring diagrams for all five boards are in `wiring-diagrams/`. Open
 
 Board role:
 - Receiver / vehicle controller
-- MAC: `14:33:5C:61:11:40`
+- MAC: `68:FE:71:2C:0B:C8`
 - Sketch: `MazeRoomba/RC_Car_ESPNow/RC_Car_ESPNow.ino`
 
 ### Left Stepper Motor (Motor 1)
@@ -37,13 +37,13 @@ Notes:
 - The sketch uses `AccelStepper::HALF4WIRE` with pin order `IN1, IN3, IN2, IN4`.
 - The left motor direction is inverted in software so both sides move forward together.
 - The joystick center is calibrated at startup. Leave the joystick centered while powering on.
-- The joystick is the car's wall-bump sensor. The car reads both axes every 40 ms and sends a `FeedbackPacket` to the **MotorESP** (`C0:CD:D6:81:FF:80`) indicating whether the joystick is deflected past its deadzone. The MotorESP pulses all four of its vibration motors while it is deflected (see [Vibration](#vibration)).
+- The joystick is the car's wall-bump sensor. The car reads both axes every 40 ms and sends a `FeedbackPacket` to the **MotorESP** (`68:FE:71:2C:78:BC`) indicating whether the joystick is deflected past its deadzone. The MotorESP pulses all four of its vibration motors while it is deflected (see [Vibration](#vibration)).
 
 ## Controller ESP32 Pinout
 
 Board role:
 - Handheld transmitter
-- MAC: `68:FE:71:2B:75:D8`
+- MAC: `14:33:5C:61:11:40`
 - Sketch: `Steering/Pot_Controller_Haptic_ESPNow/Pot_Controller_Haptic_ESPNow.ino` (with haptic feedback)
 - Legacy sketch (no haptic): `Steering/Pot_Controller_ESPNow/Pot_Controller_ESPNow.ino`
 
@@ -82,7 +82,7 @@ Notes:
 
 Board role:
 - USB-serial to ESP-NOW bridge for proximity data
-- MAC: `68:FE:71:2C:0B:C8`
+- MAC: `68:FE:71:2B:75:D8`
 - Sketch: `Bridge/ProximityBridge_ESPNow/ProximityBridge_ESPNow.ino`
 
 No additional GPIO wiring — the bridge only uses USB serial for data input and ESP-NOW for output. Connect it to the PC running `Vision/proximity_tracker.py` via USB.
@@ -163,7 +163,7 @@ The older test sketch at `MazeRoomba/Stepper-test/Joystick/Joystick.ino` used `G
 
 Board role:
 - Vibration motor controller (ESP-NOW receiver for ButtonESP and the RC car's wall feedback)
-- MAC: `c0:cd:d6:81:ff:80`
+- MAC: `68:fe:71:2c:78:bc`
 - Sketch: `Vibration/spinnything/spinnything.ino`
 
 ### Motor Driver 1
@@ -182,13 +182,13 @@ Notes:
 - **Buttons:** each motor runs solid (`PWM 150`) while its ButtonESP button is held and stops when it is released — START on the press edge, STOP on the release edge. ButtonESP repeats START every 100 ms while a button is held, and the MotorESP stops a motor if no START arrives for 400 ms (`BUTTON_TIMEOUT_MS`), so a lost packet cannot leave a motor running.
 - **Wall feedback:** while the RC car's joystick reports a deflection, all four motors pulse together (`PWM 150`, 100 ms on / 100 ms off). The pulse stops when the joystick re-centres or the car's `FeedbackPacket`s stop for 500 ms. Tuneables: `WALL_PWM_LEVEL`, `WALL_PULSE_ON_MS`, `WALL_PULSE_OFF_MS`, `WALL_TIMEOUT_MS`.
 - A held button takes priority over the wall pulse for its own motor.
-- Car `FeedbackPacket`s are only accepted from the car MAC `14:33:5C:61:11:40`.
+- Car `FeedbackPacket`s are only accepted from the car MAC `68:FE:71:2C:0B:C8`.
 
 ## ButtonESP Pinout
 
 Board role:
 - Button transmitter (ESP-NOW sender)
-- MAC: `68:FE:71:2C:78:BC`
+- MAC: `C0:CD:D6:81:FF:80`
 - Sketch: `Vibration/buttonTrigger/buttonTrigger.ino`
 
 ### Buttons

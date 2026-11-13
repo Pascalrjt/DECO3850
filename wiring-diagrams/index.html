@@ -59,7 +59,7 @@
 
   <section>
     <h2>1. Controller ESP32</h2>
-    <p class="sub">MAC 68:FE:71:2B:75:D8 · sketch <code>Pot_Controller_Haptic_ESPNow</code> · Keyestudio ESP32 PLUS, ElectroCookie solderable breadboard, 2 DFRobot DRI0044 drivers, 3 pots, 3 vibration motors</p>
+    <p class="sub">MAC 14:33:5C:61:11:40 · sketch <code>Pot_Controller_Haptic_ESPNow</code> · Keyestudio ESP32 PLUS, ElectroCookie solderable breadboard, 2 DFRobot DRI0044 drivers, 3 pots, 3 vibration motors</p>
     <div class="scroll" id="controller"></div>
     <ul>
       <li>The ESP32 connects only to the ElectroCookie board. Every rail and junction dot in the diagram is a soldered row on that board.</li>
@@ -99,7 +99,7 @@
 
   <section>
     <h2>2. RC Car ESP32</h2>
-    <p class="sub">MAC 14:33:5C:61:11:40 · sketch <code>RC_Car_ESPNow</code> · 2 stepper motors, 1 joystick</p>
+    <p class="sub">MAC 68:FE:71:2C:0B:C8 · sketch <code>RC_Car_ESPNow</code> · 2 stepper motors, 1 joystick</p>
     <div class="scroll" id="car"></div>
     <ul>
       <li>The joystick pin labelled <b>+5V</b> goes to <b>3.3 V</b>, so its outputs stay within the ADC range.</li>
@@ -111,7 +111,7 @@
 
   <section>
     <h2>3. Bridge ESP32</h2>
-    <p class="sub">MAC 68:FE:71:2C:0B:C8 · sketch <code>ProximityBridge_ESPNow</code> · USB only</p>
+    <p class="sub">MAC 68:FE:71:2B:75:D8 · sketch <code>ProximityBridge_ESPNow</code> · USB only</p>
     <div class="scroll" id="bridge"></div>
     <ul>
       <li>The bridge is a Keyestudio ESP32 PLUS with no GPIO wiring. One USB-C cable gives it power and serial data (115200 baud).</li>
@@ -119,7 +119,7 @@
   </section>
   <section>
     <h2>4. ButtonESP</h2>
-    <p class="sub">MAC 68:FE:71:2C:78:BC · sketch <code>buttonTrigger</code> · 4 push buttons</p>
+    <p class="sub">MAC C0:CD:D6:81:FF:80 · sketch <code>buttonTrigger</code> · 4 push buttons</p>
     <div class="scroll" id="buttons"></div>
     <ul>
       <li>Each button sits between its GPIO and ground. The sketch turns on the internal pull-ups, so the buttons need no resistors and no 3.3 V wire.</li>
@@ -129,7 +129,7 @@
 
   <section>
     <h2>5. MotorESP</h2>
-    <p class="sub">MAC C0:CD:D6:81:FF:80 · sketch <code>spinnything</code> · Keyestudio ESP32 PLUS, one ElectroCookie Mini PCB, 2 DFRobot DRI0044 drivers, 4 vibration motors</p>
+    <p class="sub">MAC 68:FE:71:2C:78:BC · sketch <code>spinnything</code> · Keyestudio ESP32 PLUS, one ElectroCookie Mini PCB, 2 DFRobot DRI0044 drivers, 4 vibration motors</p>
     <div class="scroll" id="motors"></div>
     <ul>
       <li>Button 1 runs motor 1, and so on. Each motor runs while its button is held.</li>
