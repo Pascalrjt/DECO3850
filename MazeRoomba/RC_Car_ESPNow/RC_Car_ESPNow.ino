@@ -221,15 +221,21 @@ void loop() {
   ControlPacket command = {};
   bool packetAvailable = false;
   unsigned long packetAgeMs = 0;
-  unsigned long now = millis();
+  unsigned long packetMillis = 0;
 
   portENTER_CRITICAL(&packetMux);
   packetAvailable = hasPacket;
   if (hasPacket) {
     command = latestPacket;
-    packetAgeMs = now - lastPacketMillis;
+    packetMillis = lastPacketMillis;
   }
   portEXIT_CRITICAL(&packetMux);
+
+  // Read the clock after the snapshot, so the packet timestamp cannot be newer than `now`
+  unsigned long now = millis();
+  if (packetAvailable) {
+    packetAgeMs = now - packetMillis;
+  }
 
   float targetLeft = 0.0f;
   float targetRight = 0.0f;
@@ -249,7 +255,10 @@ void loop() {
     targetRight = rightMix * MAX_SPEED;
     failsafeActive = false;
   } else {
+    // Control link lost: stop at once instead of ramping down
     failsafeActive = true;
+    currentLeft = 0.0f;
+    currentRight = 0.0f;
   }
 
   float dt = (now - lastRampTime) / 1000.0f;

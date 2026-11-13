@@ -64,6 +64,8 @@ portMUX_TYPE proxMux = portMUX_INITIALIZER_UNLOCKED;
 ProximityPacket latestProximity = {};
 bool hasProximity = false;
 unsigned long lastProxMs = 0;
+uint32_t proxRejected = 0;
+uint32_t proxRejectedReported = 0;
 
 bool proxMotorOn = false;
 unsigned long proxPulseStart = 0;
@@ -153,8 +155,18 @@ uint16_t scaledUnsignedCommand(float normalized) {
   return (uint16_t)lroundf(clampFloat(normalized, 0.0f, 1.0f) * COMMAND_SCALE);
 }
 
+bool bridgeMacIsSet();
+
 void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int dataLen) {
   if (dataLen == sizeof(ProximityPacket)) {
+    // Only the bridge may drive the proximity motor (any sender is accepted while BRIDGE_MAC is unset)
+    if (bridgeMacIsSet() && !macsEqual(info->src_addr, BRIDGE_MAC)) {
+      portENTER_CRITICAL(&proxMux);
+      proxRejected++;
+      portEXIT_CRITICAL(&proxMux);
+      return;
+    }
+
     ProximityPacket pkt;
     memcpy(&pkt, data, sizeof(pkt));
 
@@ -338,14 +350,22 @@ void loop() {
   ProximityPacket prox = {};
   bool proxValid = false;
   unsigned long proxAge = 0;
+  unsigned long proxMs = 0;
+  uint32_t rejected = 0;
 
   portENTER_CRITICAL(&proxMux);
   if (hasProximity) {
     prox = latestProximity;
-    proxAge = now - lastProxMs;
+    proxMs = lastProxMs;
     proxValid = true;
   }
+  rejected = proxRejected;
   portEXIT_CRITICAL(&proxMux);
+
+  // Read the clock after the snapshot, so the packet timestamp cannot be newer than it
+  if (proxValid) {
+    proxAge = millis() - proxMs;
+  }
 
   bool proxActive = proxValid
                     && proxAge <= PROX_TIMEOUT_MS
@@ -358,6 +378,9 @@ void loop() {
       proxStrength = prox.strength;
       proxPulseOn = prox.pulse_on_ms;
       proxPulseOff = prox.pulse_off_ms;
+      if (proxMotorOn) {
+        analogWrite(PROX_PWM_PIN, proxStrength);   // apply a new strength straight away
+      }
     }
 
     if (proxPulseOff == 0) {
@@ -365,6 +388,7 @@ void loop() {
         digitalWrite(PROX_DIR_PIN, HIGH);
         analogWrite(PROX_PWM_PIN, proxStrength);
         proxMotorOn = true;
+        proxPulseStart = now;
       }
     } else {
       unsigned long elapsed = now - proxPulseStart;
@@ -410,5 +434,10 @@ void loop() {
     Serial.print(prox.seq);
     Serial.print("  PxAge: ");
     Serial.println(proxAge);
+    if (rejected != proxRejectedReported) {
+      proxRejectedReported = rejected;
+      Serial.print("Ignored proximity packets from senders other than the bridge: ");
+      Serial.println(rejected);
+    }
   }
 }

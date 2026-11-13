@@ -61,7 +61,7 @@ One vibration motor for proximity feedback, on one DFRobot dual driver (`M1` cha
 
 #### Driver power
 - Driver `GND` -> ESP32 `GND` (common ground)
-- Driver `VCC` -> `5V` (logic supply, can share USB 5V)
+- Driver `VCC` -> `3.3V` (logic supply; at 5V the driver needs 3.5V for a logic high and the ESP32 outputs 3.3V)
 - Driver `VM` -> external motor power supply positive (6-12V typical)
 - Motor supply `GND` -> driver `GND` (common ground)
 
@@ -91,7 +91,7 @@ This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic
 - The bridge sends `ProximityPacket` (motor strength, pulse timing, flags) to the controller at ~20 Hz.
 - ButtonESP sends 1-byte `TriggerPacket`s to the MotorESP on the same channel.
 - Packet types have distinct sizes (Control 11, Feedback 9, Proximity 10, Trigger 1 bytes), so receivers dispatch by `dataLen`.
-- The car stops driving if controller packets time out (250 ms).
+- The car stops driving at once, with no ramp-down, if controller packets time out (250 ms).
 - The controller stops the proximity motor if `ProximityPacket`s time out (500 ms).
 - The MotorESP stops the wall pulse if `FeedbackPacket`s time out (500 ms).
 - All five boards that use ESP-NOW (controller, car, bridge, MotorESP, ButtonESP) must be on channel `6`.
@@ -172,7 +172,7 @@ Board role:
 - `GPIO 19` -> `M4_DIR`
 
 Notes:
-- **Buttons:** each motor runs solid (`PWM 150`) while its ButtonESP button is held and stops when it is released — START on the press edge, STOP on the release edge. There is no timeout on button commands, so a motor only stops when a STOP command arrives.
+- **Buttons:** each motor runs solid (`PWM 150`) while its ButtonESP button is held and stops when it is released — START on the press edge, STOP on the release edge. ButtonESP repeats START every 100 ms while a button is held, and the MotorESP stops a motor if no START arrives for 400 ms (`BUTTON_TIMEOUT_MS`), so a lost packet cannot leave a motor running.
 - **Wall feedback:** while the RC car's joystick reports a deflection, all four motors pulse together (`PWM 150`, 100 ms on / 100 ms off). The pulse stops when the joystick re-centres or the car's `FeedbackPacket`s stop for 500 ms. Tuneables: `WALL_PWM_LEVEL`, `WALL_PULSE_ON_MS`, `WALL_PULSE_OFF_MS`, `WALL_TIMEOUT_MS`.
 - A held button takes priority over the wall pulse for its own motor.
 - Car `FeedbackPacket`s are only accepted from the car MAC `14:33:5C:61:11:40`.
@@ -192,14 +192,15 @@ Board role:
 
 Notes:
 - All buttons use `INPUT_PULLUP`; connect one side to the GPIO and the other to `GND`.
-- The falling edge (press) sends a START byte (`0x01`–`0x04`) and the rising edge (release) sends the matching STOP byte (`0x11`–`0x14`), so the motor is active for exactly as long as the button is held.
-- The loop polls every 10 ms with edge detection against the previous reading — no debouncing beyond that delay.
+- The falling edge (press) sends a START byte (`0x01`–`0x04`) and the rising edge (release) sends the matching STOP byte (`0x11`–`0x14`), so the motor is active while the button is held. While held, the START byte is repeated every 100 ms (`HEARTBEAT_MS`).
+- The loop polls every 5 ms. A reading must stay unchanged for 20 ms (`DEBOUNCE_MS`) before it counts as a press or release.
 
 ## Vibration Wireless Link
 
 - Protocol: `ESP-NOW`, channel `6` (shared with the MazeRoomba boards so the MotorESP can also receive the car's wall feedback)
-- ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button edge — one packet on press, one on release.
+- ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button edge (one on press, one on release) and repeats the START packet every 100 ms while the button stays held.
 - START command byte mapping: `0x01` = Motor 1, `0x02` = Motor 2, `0x03` = Motor 3, `0x04` = Motor 4.
 - STOP command byte mapping: `0x11` = Motor 1, `0x12` = Motor 2, `0x13` = Motor 3, `0x14` = Motor 4 (high nibble `0x10` is OR-ed onto the motor id).
-- MotorESP runs the matching motor on START and stops it on STOP; there is no automatic timeout, so a lost STOP packet will leave the motor running until the next STOP arrives.
+- MotorESP runs the matching motor on START and stops it on STOP, or after 400 ms without a repeated START. A lost START is recovered by the next repeat, and a lost STOP by the timeout.
+- MotorESP obeys button packets only from the ButtonESP MAC and `FeedbackPacket`s only from the RC car MAC. The controller obeys `ProximityPacket`s only from the bridge MAC. If a board is replaced, update the MAC constants in the receiving sketch.
 

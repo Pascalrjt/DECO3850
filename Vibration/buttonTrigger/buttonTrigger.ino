@@ -5,23 +5,30 @@
 // START commands: 0x01–0x04 (Motor 1–4)
 // STOP  commands: 0x11–0x14 (Motor 1–4)
 //
+// A START is sent on the press and repeated every HEARTBEAT_MS while the button
+// stays held. MotorESP stops a motor when the repeats stop arriving, so a lost
+// packet in either direction corrects itself within a fraction of a second.
+//
 // ButtonESP MAC : 68:FE:71:2C:78:BC
 // MotorESP  MAC : c0:cd:d6:81:ff:80
 
 #include <esp_now.h>
 #include <WiFi.h>
+#include <esp_idf_version.h>
 
-// --- Button pins ---
-const int BTN_1 = 27;   // triggers Motor 1
-const int BTN_2 = 14;   // triggers Motor 2
-const int BTN_3 = 12;   // triggers Motor 3
-const int BTN_4 = 13;   // triggers Motor 4
+// --- Button pins (index 0..3 = Button 1..4, each triggers the same-numbered motor) ---
+const int NUM_BUTTONS = 4;
+const int BTN_PINS[NUM_BUTTONS] = { 27, 14, 12, 13 };
 
 // MotorESP MAC address
 uint8_t motorEspMac[] = { 0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80 };
 
 // Must match MotorESP, which shares channel 6 with the RC car
 const uint8_t ESPNOW_CHANNEL = 6;
+
+const unsigned long DEBOUNCE_MS = 20;    // a reading must hold this long before it counts
+const unsigned long HEARTBEAT_MS = 100;  // START repeat interval while held (MotorESP expects one within 400 ms)
+const unsigned long POLL_DELAY_MS = 5;
 
 // Packet: single byte command
 // START: 0x01 = Motor 1, 0x02 = Motor 2, 0x03 = Motor 3, 0x04 = Motor 4
@@ -30,47 +37,51 @@ typedef struct {
   uint8_t command;
 } TriggerPacket;
 
-TriggerPacket packet;
+// The send callback's first argument changed in ESP-IDF 5.5 (Arduino-ESP32 3.3)
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+typedef const wifi_tx_info_t *SendCallbackInfo;
+#else
+typedef const uint8_t *SendCallbackInfo;
+#endif
 
 // Button state tracking
-bool lastBtn1 = HIGH;
-bool lastBtn2 = HIGH;
-bool lastBtn3 = HIGH;
-bool lastBtn4 = HIGH;
+bool pressed[NUM_BUTTONS] = { false, false, false, false };   // debounced state
+bool lastRaw[NUM_BUTTONS] = { false, false, false, false };   // last raw reading
+unsigned long lastRawChangeMs[NUM_BUTTONS] = { 0, 0, 0, 0 };
+unsigned long lastHeartbeatMs = 0;
 
-void onDataSent(const wifi_tx_info_t *txInfo, esp_now_send_status_t status) {
-  Serial.print("-> Send status: ");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "OK" : "FAIL");
+void onDataSent(SendCallbackInfo info, esp_now_send_status_t status) {
+  if (status != ESP_NOW_SEND_SUCCESS) {
+    Serial.println("-> Send FAILED (is MotorESP powered and on the same channel?)");
+  }
 }
 
-void sendCommand(uint8_t cmd, const char *label) {
+void sendCommand(uint8_t cmd) {
+  TriggerPacket packet;
   packet.command = cmd;
   esp_now_send(motorEspMac, (uint8_t *)&packet, sizeof(packet));
-  Serial.print("-> Sent ");
-  Serial.println(label);
 }
 
 void sendStart(uint8_t motorNum) {
   Serial.print("Button ");
   Serial.print(motorNum);
   Serial.println(" held — START");
-  sendCommand(motorNum, "START");
+  sendCommand(motorNum);
 }
 
 void sendStop(uint8_t motorNum) {
   Serial.print("Button ");
   Serial.print(motorNum);
   Serial.println(" released — STOP");
-  sendCommand(0x10 | motorNum, "STOP");
+  sendCommand(0x10 | motorNum);
 }
 
 void setup() {
   Serial.begin(115200);
 
-  pinMode(BTN_1, INPUT_PULLUP);
-  pinMode(BTN_2, INPUT_PULLUP);
-  pinMode(BTN_3, INPUT_PULLUP);
-  pinMode(BTN_4, INPUT_PULLUP);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    pinMode(BTN_PINS[i], INPUT_PULLUP);
+  }
 
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
@@ -103,27 +114,31 @@ void setup() {
 }
 
 void loop() {
-  bool currentBtn1 = digitalRead(BTN_1);
-  bool currentBtn2 = digitalRead(BTN_2);
-  bool currentBtn3 = digitalRead(BTN_3);
-  bool currentBtn4 = digitalRead(BTN_4);
+  unsigned long now = millis();
 
-  // Falling edge (press)  → START motor
-  if (currentBtn1 == LOW  && lastBtn1 == HIGH) sendStart(0x01);
-  if (currentBtn2 == LOW  && lastBtn2 == HIGH) sendStart(0x02);
-  if (currentBtn3 == LOW  && lastBtn3 == HIGH) sendStart(0x03);
-  if (currentBtn4 == LOW  && lastBtn4 == HIGH) sendStart(0x04);
+  for (int i = 0; i < NUM_BUTTONS; i++) {
+    bool raw = (digitalRead(BTN_PINS[i]) == LOW);   // pressed pulls the pin to GND
 
-  // Rising edge (release) → STOP motor
-  if (currentBtn1 == HIGH && lastBtn1 == LOW)  sendStop(0x01);
-  if (currentBtn2 == HIGH && lastBtn2 == LOW)  sendStop(0x02);
-  if (currentBtn3 == HIGH && lastBtn3 == LOW)  sendStop(0x03);
-  if (currentBtn4 == HIGH && lastBtn4 == LOW)  sendStop(0x04);
+    if (raw != lastRaw[i]) {
+      lastRaw[i] = raw;
+      lastRawChangeMs[i] = now;
+    } else if (raw != pressed[i] && now - lastRawChangeMs[i] >= DEBOUNCE_MS) {
+      pressed[i] = raw;
+      if (raw) {
+        sendStart(i + 1);   // press   -> START
+      } else {
+        sendStop(i + 1);    // release -> STOP
+      }
+    }
+  }
 
-  lastBtn1 = currentBtn1;
-  lastBtn2 = currentBtn2;
-  lastBtn3 = currentBtn3;
-  lastBtn4 = currentBtn4;
+  // Repeat START for every held button so MotorESP can tell the link is alive
+  if (now - lastHeartbeatMs >= HEARTBEAT_MS) {
+    lastHeartbeatMs = now;
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+      if (pressed[i]) sendCommand(i + 1);
+    }
+  }
 
-  delay(10);
+  delay(POLL_DELAY_MS);
 }
