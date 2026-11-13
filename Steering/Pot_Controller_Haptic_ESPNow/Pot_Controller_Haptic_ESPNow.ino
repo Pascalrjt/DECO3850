@@ -5,14 +5,7 @@ const int POT_STEER_PIN = 34;
 const int POT_THROTTLE_PIN = 35;
 const int POT_BRAKE_PIN = 32;
 
-// Wall haptic motors (two motors, driven together)
-const int HAPTIC_A_DIR_PIN = 19;
-const int HAPTIC_A_PWM_PIN = 23;
-const int HAPTIC_B_DIR_PIN = 27;
-const int HAPTIC_B_PWM_PIN = 13;
-const int HAPTIC_PWM_LEVEL = 10;
-
-// Proximity haptic motor
+// Proximity haptic motor (wall haptics now live on the MotorESP)
 const int PROX_PWM_PIN = 25;
 const int PROX_DIR_PIN = 26;
 
@@ -34,7 +27,6 @@ const float BRAKE_ARM_LEVEL = 0.95f;
 const unsigned long REVERSE_HOLD_MS = 2000;
 const unsigned long SEND_INTERVAL_MS = 40;
 const unsigned long PRINT_INTERVAL_MS = 250;
-const unsigned long FEEDBACK_TIMEOUT_MS = 500;
 const unsigned long PROX_TIMEOUT_MS = 500;
 
 const bool INVERT_STEERING = false;
@@ -46,13 +38,6 @@ struct __attribute__((packed)) ControlPacket {
   uint16_t throttle;
   uint16_t brake;
   uint8_t reverseArmed;
-};
-
-struct __attribute__((packed)) FeedbackPacket {
-  uint32_t seq;
-  uint8_t deflected;
-  int16_t joyX;
-  int16_t joyY;
 };
 
 struct __attribute__((packed)) ProximityPacket {
@@ -73,13 +58,6 @@ unsigned long brakeHoldStart = 0;
 unsigned long lastSendTime = 0;
 unsigned long lastPrintTime = 0;
 uint32_t packetSequence = 0;
-
-// Wall haptic state
-portMUX_TYPE feedbackMux = portMUX_INITIALIZER_UNLOCKED;
-FeedbackPacket latestFeedback = {};
-bool hasFeedback = false;
-unsigned long lastFeedbackMs = 0;
-bool wallMotorOn = false;
 
 // Proximity haptic state
 portMUX_TYPE proxMux = portMUX_INITIALIZER_UNLOCKED;
@@ -175,28 +153,8 @@ uint16_t scaledUnsignedCommand(float normalized) {
   return (uint16_t)lroundf(clampFloat(normalized, 0.0f, 1.0f) * COMMAND_SCALE);
 }
 
-void writeWallMotor(int dirPin, int pwmPin, bool on) {
-  if (on) {
-    digitalWrite(dirPin, HIGH);
-    analogWrite(pwmPin, HAPTIC_PWM_LEVEL);
-  } else {
-    analogWrite(pwmPin, 0);
-    digitalWrite(dirPin, LOW);
-  }
-}
-
 void onEspNowRecv(const esp_now_recv_info_t *info, const uint8_t *data, int dataLen) {
-  if (dataLen == sizeof(FeedbackPacket) && macsEqual(info->src_addr, CAR_MAC)) {
-    FeedbackPacket fb;
-    memcpy(&fb, data, sizeof(fb));
-
-    portENTER_CRITICAL(&feedbackMux);
-    latestFeedback = fb;
-    hasFeedback = true;
-    lastFeedbackMs = millis();
-    portEXIT_CRITICAL(&feedbackMux);
-
-  } else if (dataLen == sizeof(ProximityPacket)) {
+  if (dataLen == sizeof(ProximityPacket)) {
     ProximityPacket pkt;
     memcpy(&pkt, data, sizeof(pkt));
 
@@ -325,15 +283,6 @@ void setup() {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db);
 
-  pinMode(HAPTIC_A_DIR_PIN, OUTPUT);
-  pinMode(HAPTIC_A_PWM_PIN, OUTPUT);
-  pinMode(HAPTIC_B_DIR_PIN, OUTPUT);
-  pinMode(HAPTIC_B_PWM_PIN, OUTPUT);
-  digitalWrite(HAPTIC_A_DIR_PIN, LOW);
-  digitalWrite(HAPTIC_A_PWM_PIN, LOW);
-  digitalWrite(HAPTIC_B_DIR_PIN, LOW);
-  digitalWrite(HAPTIC_B_PWM_PIN, LOW);
-
   pinMode(PROX_PWM_PIN, OUTPUT);
   pinMode(PROX_DIR_PIN, OUTPUT);
   digitalWrite(PROX_DIR_PIN, LOW);
@@ -344,7 +293,7 @@ void setup() {
   calibrateThrottleRest();
   calibrateBrakeRest();
 
-  Serial.println("Pot controller transmitter (haptic + proximity) ready");
+  Serial.println("Pot controller transmitter (proximity haptic) ready");
 }
 
 void loop() {
@@ -385,32 +334,7 @@ void loop() {
     esp_now_send(CAR_MAC, reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
   }
 
-  // --- Wall haptic (M1) ---
-  FeedbackPacket fb = {};
-  bool fbValid = false;
-  unsigned long fbAge = 0;
-
-  portENTER_CRITICAL(&feedbackMux);
-  if (hasFeedback) {
-    fb = latestFeedback;
-    fbAge = now - lastFeedbackMs;
-    fbValid = true;
-  }
-  portEXIT_CRITICAL(&feedbackMux);
-
-  bool wantWallMotor = fbValid && fbAge <= FEEDBACK_TIMEOUT_MS && fb.deflected == 1;
-
-  if (wantWallMotor && !wallMotorOn) {
-    writeWallMotor(HAPTIC_A_DIR_PIN, HAPTIC_A_PWM_PIN, true);
-    writeWallMotor(HAPTIC_B_DIR_PIN, HAPTIC_B_PWM_PIN, true);
-    wallMotorOn = true;
-  } else if (!wantWallMotor && wallMotorOn) {
-    writeWallMotor(HAPTIC_A_DIR_PIN, HAPTIC_A_PWM_PIN, false);
-    writeWallMotor(HAPTIC_B_DIR_PIN, HAPTIC_B_PWM_PIN, false);
-    wallMotorOn = false;
-  }
-
-  // --- Proximity haptic (M2) ---
+  // --- Proximity haptic ---
   ProximityPacket prox = {};
   bool proxValid = false;
   unsigned long proxAge = 0;
@@ -478,16 +402,10 @@ void loop() {
     Serial.print(brake, 2);
     Serial.print("  Reverse: ");
     Serial.print(reverseArmed);
-    Serial.print("  Wall: ");
-    Serial.print(wallMotorOn ? "ON" : "OFF");
     Serial.print("  Prox: ");
     Serial.print(proxMotorOn ? "ON" : "OFF");
     Serial.print("  ProxStr: ");
     Serial.print(proxStrength);
-    Serial.print("  FbSeq: ");
-    Serial.print(fb.seq);
-    Serial.print("  FbAge: ");
-    Serial.print(fbAge);
     Serial.print("  PxSeq: ");
     Serial.print(prox.seq);
     Serial.print("  PxAge: ");

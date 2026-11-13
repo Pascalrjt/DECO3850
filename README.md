@@ -30,7 +30,7 @@ Notes:
 - The sketch uses `AccelStepper::HALF4WIRE` with pin order `IN1, IN3, IN2, IN4`.
 - The left motor direction is inverted in software so both sides move forward together.
 - The joystick center is calibrated at startup. Leave the joystick centered while powering on.
-- The car reads both axes every 40 ms and sends a `FeedbackPacket` back to the controller indicating whether the joystick is deflected past its deadzone.
+- The joystick is the car's wall-bump sensor. The car reads both axes every 40 ms and sends a `FeedbackPacket` to the **MotorESP** (`C0:CD:D6:81:FF:80`) indicating whether the joystick is deflected past its deadzone. The MotorESP pulses all four of its vibration motors while it is deflected (see [Vibration](#vibration)).
 
 ## Controller ESP32 Pinout
 
@@ -50,21 +50,16 @@ Board role:
 - Other outer pin -> `GND`
 - Pot center pin / wiper -> assigned GPIO above
 
-### Haptic Motor Drivers
+### Haptic Motor Driver
 
-Three vibration motors total — two for wall feedback, one for proximity. A single DFRobot dual driver only exposes two channels (M1/M2), so this build needs **two dual drivers** (one channel left spare) or a quad driver.
-
-#### Wall feedback — two motors (driven together)
-- Motor A: `GPIO 23` -> `PWM`, `GPIO 19` -> `DIR`
-- Motor B: `GPIO 13` -> `PWM`, `GPIO 27` -> `DIR`
-- Each motor's wires -> a driver channel's `+` / `-` terminals
+One vibration motor for proximity feedback, on one DFRobot dual driver (`M1` channel used, `M2` spare). Wall feedback has moved to the MotorESP, so the controller no longer has wall motors.
 
 #### Proximity feedback — one motor
-- `GPIO 25` -> `PWM`
-- `GPIO 26` -> `DIR`
-- Motor wires -> a driver channel's `+` / `-` terminals
+- `GPIO 25` -> `PWM` (driver `PWM1`)
+- `GPIO 26` -> `DIR` (driver `DIR1`)
+- Motor wires -> driver `M1+` / `M1-`
 
-#### Driver power (wire for each driver)
+#### Driver power
 - Driver `GND` -> ESP32 `GND` (common ground)
 - Driver `VCC` -> `5V` (logic supply, can share USB 5V)
 - Driver `VM` -> external motor power supply positive (6-12V typical)
@@ -73,9 +68,8 @@ Three vibration motors total — two for wall feedback, one for proximity. A sin
 Notes:
 - `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
 - The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
-- The two wall haptic motors run together while the car-side joystick is deflected and stop immediately when the joystick returns to center or the feedback link times out.
 - The proximity haptic motor pulses according to `ProximityPacket` messages from the bridge ESP32. Distance is quantised into 200 mm buckets and each bucket fires a fixed 100 ms pulse at full PWM (255); only the gap between pulses changes. Faster pulses mean the car is closer to the destination — see the table under [Proximity Tracking (PC-side)](#proximity-tracking-pc-side).
-- The haptic GPIOs (13/19/23/25/26/27) are all general-purpose pins with no ESP32 boot-strapping role, so a driver input cannot block start-up. Avoid `GPIO 12` for these — it selects flash voltage at boot, and a driver holding it high can stop the board from booting.
+- The haptic GPIOs (25/26) are general-purpose pins with no ESP32 boot-strapping role, so a driver input cannot block start-up. Avoid `GPIO 12` for haptics — it selects flash voltage at boot, and a driver holding it high can stop the board from booting.
 
 ## Bridge ESP32 Pinout
 
@@ -93,11 +87,14 @@ This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic
 - Protocol: `ESP-NOW`
 - Channel: `6`
 - The controller sends `ControlPacket` (steering, throttle, brake, reverse-arm) to the car every 40 ms.
-- The car sends `FeedbackPacket` (joystick deflection state, X/Y values) back to the controller every 40 ms.
+- The car sends `FeedbackPacket` (joystick deflection state, X/Y values) to the MotorESP every 40 ms.
 - The bridge sends `ProximityPacket` (motor strength, pulse timing, flags) to the controller at ~20 Hz.
-- All three packet types have distinct sizes (11 / 9 / 10 bytes) so the controller dispatches by `dataLen`.
+- ButtonESP sends 1-byte `TriggerPacket`s to the MotorESP on the same channel.
+- Packet types have distinct sizes (Control 11, Feedback 9, Proximity 10, Trigger 1 bytes), so receivers dispatch by `dataLen`.
 - The car stops driving if controller packets time out (250 ms).
-- The controller stops each haptic motor independently if the corresponding packet stream times out (500 ms).
+- The controller stops the proximity motor if `ProximityPacket`s time out (500 ms).
+- The MotorESP stops the wall pulse if `FeedbackPacket`s time out (500 ms).
+- All five boards that use ESP-NOW (controller, car, bridge, MotorESP, ButtonESP) must be on channel `6`.
 
 ## Proximity Tracking (PC-side)
 
@@ -158,26 +155,27 @@ The older test sketch at `MazeRoomba/Stepper-test/Joystick/Joystick.ino` used `G
 ## MotorESP Pinout
 
 Board role:
-- Vibration motor controller (ESP-NOW receiver)
+- Vibration motor controller (ESP-NOW receiver for ButtonESP and the RC car's wall feedback)
 - MAC: `c0:cd:d6:81:ff:80`
 - Sketch: `Vibration/spinnything/spinnything.ino`
 
-### Motor Driver 1 (all channels ESP-NOW triggered)
+### Motor Driver 1
 - `GPIO 25` -> `M1_PWM`
 - `GPIO 26` -> `M1_DIR`
 - `GPIO 17` -> `M2_PWM`
 - `GPIO 27` -> `M2_DIR`
 
-### Motor Driver 2 (all channels ESP-NOW triggered)
+### Motor Driver 2
 - `GPIO 5`  -> `M3_PWM`
 - `GPIO 13` -> `M3_DIR`
 - `GPIO 23` -> `M4_PWM`
 - `GPIO 19` -> `M4_DIR`
 
 Notes:
-- All four motors are triggered wirelessly by ButtonESP over ESP-NOW.
-- Each motor runs while its button is held and stops when the button is released — START on the press edge, STOP on the release edge.
-- Motor output is a fixed `analogWrite(pwm, 150)` with `DIR` held HIGH; there is no on-board timeout, so the motor only stops when a STOP command arrives.
+- **Buttons:** each motor runs solid (`PWM 150`) while its ButtonESP button is held and stops when it is released — START on the press edge, STOP on the release edge. There is no timeout on button commands, so a motor only stops when a STOP command arrives.
+- **Wall feedback:** while the RC car's joystick reports a deflection, all four motors pulse together (`PWM 150`, 100 ms on / 100 ms off). The pulse stops when the joystick re-centres or the car's `FeedbackPacket`s stop for 500 ms. Tuneables: `WALL_PWM_LEVEL`, `WALL_PULSE_ON_MS`, `WALL_PULSE_OFF_MS`, `WALL_TIMEOUT_MS`.
+- A held button takes priority over the wall pulse for its own motor.
+- Car `FeedbackPacket`s are only accepted from the car MAC `14:33:5C:61:11:40`.
 
 ## ButtonESP Pinout
 
@@ -199,7 +197,7 @@ Notes:
 
 ## Vibration Wireless Link
 
-- Protocol: `ESP-NOW`
+- Protocol: `ESP-NOW`, channel `6` (shared with the MazeRoomba boards so the MotorESP can also receive the car's wall feedback)
 - ButtonESP sends a `TriggerPacket` (1 byte) to MotorESP on each button edge — one packet on press, one on release.
 - START command byte mapping: `0x01` = Motor 1, `0x02` = Motor 2, `0x03` = Motor 3, `0x04` = Motor 4.
 - STOP command byte mapping: `0x11` = Motor 1, `0x12` = Motor 2, `0x13` = Motor 3, `0x14` = Motor 4 (high nibble `0x10` is OR-ed onto the motor id).

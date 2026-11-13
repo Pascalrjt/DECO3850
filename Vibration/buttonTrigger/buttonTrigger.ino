@@ -20,6 +20,9 @@ const int BTN_4 = 13;   // triggers Motor 4
 // MotorESP MAC address
 uint8_t motorEspMac[] = { 0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80 };
 
+// Must match MotorESP, which shares channel 6 with the RC car
+const uint8_t ESPNOW_CHANNEL = 6;
+
 // Packet: single byte command
 // START: 0x01 = Motor 1, 0x02 = Motor 2, 0x03 = Motor 3, 0x04 = Motor 4
 // STOP:  0x11 = Motor 1, 0x12 = Motor 2, 0x13 = Motor 3, 0x14 = Motor 4
@@ -70,7 +73,12 @@ void setup() {
   pinMode(BTN_4, INPUT_PULLUP);
 
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect();
+  WiFi.setSleep(false);
+  WiFi.setChannel(ESPNOW_CHANNEL);
+
+  while (!WiFi.STA.started()) {
+    delay(10);
+  }
 
   if (esp_now_init() != ESP_OK) {
     Serial.println("ERROR: ESP-NOW init failed");
@@ -82,7 +90,8 @@ void setup() {
   // Register MotorESP as a peer
   esp_now_peer_info_t peerInfo = {};
   memcpy(peerInfo.peer_addr, motorEspMac, 6);
-  peerInfo.channel = 0;
+  peerInfo.channel = ESPNOW_CHANNEL;
+  peerInfo.ifidx = WIFI_IF_STA;
   peerInfo.encrypt = false;
 
   if (esp_now_add_peer(&peerInfo) != ESP_OK) {

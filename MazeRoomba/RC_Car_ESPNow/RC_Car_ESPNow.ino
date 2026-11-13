@@ -20,6 +20,8 @@
 
 const uint8_t LOCAL_MAC[6] = {0x14, 0x33, 0x5C, 0x61, 0x11, 0x40};
 const uint8_t CONTROLLER_MAC[6] = {0x68, 0xFE, 0x71, 0x2B, 0x75, 0xD8};
+// MotorESP pulses its four vibration motors while the joystick (wall bump) is deflected
+const uint8_t MOTOR_ESP_MAC[6] = {0xC0, 0xCD, 0xD6, 0x81, 0xFF, 0x80};
 const uint8_t ESPNOW_CHANNEL = 6;
 
 const float MAX_SPEED = 1000.0f;
@@ -147,6 +149,8 @@ void setupEspNow() {
   }
   Serial.print("Expected controller MAC: ");
   Serial.println(macToString(CONTROLLER_MAC));
+  Serial.print("Wall feedback target (MotorESP) MAC: ");
+  Serial.println(macToString(MOTOR_ESP_MAC));
   Serial.print("ESP-NOW channel: ");
   Serial.println(ESPNOW_CHANNEL);
 
@@ -163,6 +167,17 @@ void setupEspNow() {
   esp_err_t addPeerResult = esp_now_add_peer(&peerInfo);
   if (addPeerResult != ESP_OK && addPeerResult != ESP_ERR_ESPNOW_EXIST) {
     restartWithMessage(F("Failed to register controller peer. Rebooting..."));
+  }
+
+  esp_now_peer_info_t motorPeer = {};
+  memcpy(motorPeer.peer_addr, MOTOR_ESP_MAC, sizeof(MOTOR_ESP_MAC));
+  motorPeer.channel = ESPNOW_CHANNEL;
+  motorPeer.ifidx = WIFI_IF_STA;
+  motorPeer.encrypt = false;
+
+  addPeerResult = esp_now_add_peer(&motorPeer);
+  if (addPeerResult != ESP_OK && addPeerResult != ESP_ERR_ESPNOW_EXIST) {
+    restartWithMessage(F("Failed to register MotorESP peer. Rebooting..."));
   }
 
   if (esp_now_register_recv_cb(onDataRecv) != ESP_OK) {
@@ -264,7 +279,7 @@ void loop() {
     fb.joyX = (int16_t)lroundf(jx * COMMAND_SCALE);
     fb.joyY = (int16_t)lroundf(jy * COMMAND_SCALE);
 
-    esp_now_send(CONTROLLER_MAC, reinterpret_cast<const uint8_t *>(&fb), sizeof(fb));
+    esp_now_send(MOTOR_ESP_MAC, reinterpret_cast<const uint8_t *>(&fb), sizeof(fb));
   }
 
   if (now - lastPrintTime >= PRINT_INTERVAL_MS) {
