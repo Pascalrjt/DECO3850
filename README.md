@@ -33,6 +33,10 @@ Board role:
 - `+5V` / `VCC` -> `3.3V`
 - `GND` -> `GND`
 
+### Stepper Driver Power
+- Driver `+` (both drivers) -> ESP32 `5V`
+- Driver `-` (both drivers) -> ESP32 `GND`
+
 Notes:
 - The sketch uses `AccelStepper::HALF4WIRE` with pin order `IN1, IN3, IN2, IN4`.
 - The left motor direction is inverted in software so both sides move forward together.

@@ -6,8 +6,8 @@
 <title>ESP32 Wiring Diagrams</title>
 <style>
   :root {
-    --v5: #e03131; --v3: #ff7b00; --gnd: #111111; --vm: #9c36b5;
-    --an: #1c7ed6; --pwm: #2f9e44; --dig: #ffd400; --mot: #868e96; --usb: #495057;
+    --v5: #e03131; --v3: #ff7b00; --gnd: #111111; --vm: #e03131;
+    --an: #1c4fd6; --pwm: #2ba3b8; --dig: #f2c94c; --mot: #ffffff; --usb: #495057;
   }
   * { box-sizing: border-box; }
   body {
@@ -46,15 +46,13 @@
   <p class="sub">All five boards: controller, RC car, bridge, ButtonESP and MotorESP. Pins are drawn by label, so match the name printed on your board; the physical position on your dev board will differ.</p>
 
   <div class="legend">
-    <span><i style="background:var(--v5)"></i>5 V</span>
-    <span><i style="background:var(--v3)"></i>3.3 V</span>
-    <span><i style="background:var(--gnd)"></i>Ground</span>
-    <span><i style="background:var(--vm)"></i>Motor supply (6–12 V)</span>
-    <span><i style="background:var(--an)"></i>Analog signal</span>
-    <span><i style="background:var(--pwm)"></i>PWM signal</span>
-    <span><i style="background:var(--dig)"></i>Digital signal (DIR, stepper IN)</span>
-    <span><i style="background:var(--mot)"></i>Motor leads</span>
-    <span><i style="background:var(--usb)"></i>USB cable</span>
+    <span><i style="background:var(--v5)"></i>Motor supply + (on the car, 5 V from the ESP32's 5V pin): red</span>
+    <span><i style="background:var(--v3)"></i>3.3 V: orange</span>
+    <span><i style="background:var(--gnd)"></i>Ground: black</span>
+    <span style="white-space:normal"><i style="background:var(--dig)"></i><i style="background:var(--an)"></i><i style="background:var(--pwm)"></i><i style="background:var(--mot)"></i>Signal wires: yellow, blue, teal, white. Each pin of a connector gets its own colour, in pin order.</span>
+    <span><i style="background:var(--v5)"></i><i style="background:var(--gnd)"></i>Vibration motor leads: red to M+, black to M−</span>
+    <span><i style="background:var(--mot)"></i>Stepper cable (fitted to the motor)</span>
+    <span><i style="background:var(--usb)"></i>USB cable (bought cable)</span>
   </div>
 
   <section>
@@ -62,6 +60,8 @@
     <p class="sub">MAC 14:33:5C:61:11:40 · sketch <code>Pot_Controller_Haptic_ESPNow</code> · Keyestudio ESP32 PLUS, ElectroCookie solderable breadboard, 2 DFRobot DRI0044 drivers, 3 pots, 3 vibration motors</p>
     <div class="scroll" id="controller"></div>
     <ul>
+      <li><b>Signal wire colours:</b> steering wiper yellow, throttle wiper blue, brake wiper teal; on each driver, DIR1 yellow, PWM1 blue, PWM2 teal, DIR2 white.</li>
+      <li><b>Motor leads:</b> red to the driver's M+ pin, black to its M− pin. The black lead is a driver output, so keep it off the ground strip.</li>
       <li>The ESP32 connects only to the ElectroCookie board. Every rail and junction dot in the diagram is a soldered row on that board.</li>
       <li>Power the pots from <b>3.3 V</b>. The ADC pins read up to 3.3 V only.</li>
       <li>Driver <b>VCC goes to 3V3</b>. On 5 V the driver needs 3.5 V for a logic high, and the ESP32 outputs 3.3 V. The README still says 5 V.</li>
@@ -78,8 +78,9 @@
       <li>Each row has two separate 5-hole strips, one on each side of the centre channel. The <b>front half</b> is the side nearer the pot wall (bottom of the drawing), holes a to e.</li>
       <li>Rows are counted from the ESP32 side: row 1 is nearest the ESP32, row 17 nearest the supply slot.</li>
       <li>Any free hole in the same strip is electrically the same, so the strip matters more than the exact hole.</li>
-      <li>Tinted strips show which net each strip carries, using the legend colours.</li>
+      <li>Tinted strips show which net each strip carries, using the legend colours. Motor output strips are tinted grey.</li>
       <li>The four corner holes of each board stay empty so the boards seat in the cradles.</li>
+      <li>The pin headers are centred on each driver board, so the board overhangs its pins by about 3.5 mm at each end. <b>Driver 1 sits over holes c to h of row 1</b>, the 3.3 V and motor supply strip, so solder that strip's wires before fitting driver 1. The two drivers end up less than 1 mm apart; test-fit both first.</li>
       <li class="assume">Assumed: you built the two-Mini-PCB enclosure, and each driver's two pin rows sit seven holes apart (columns c and h). Check the driver against the board before soldering.</li>
     </ul>
     <table>
@@ -99,14 +100,47 @@
 
   <section>
     <h2>2. RC Car ESP32</h2>
-    <p class="sub">MAC 68:FE:71:2C:0B:C8 · sketch <code>RC_Car_ESPNow</code> · 2 stepper motors, 1 joystick</p>
+    <p class="sub">MAC 68:FE:71:2C:0B:C8 · sketch <code>RC_Car_ESPNow</code> · Keyestudio ESP32 PLUS, one ElectroCookie Mini PCB, 2 stepper motors, 1 joystick</p>
     <div class="scroll" id="car"></div>
     <ul>
+      <li><b>Signal wire colours:</b> IN1 yellow, IN2 blue, IN3 teal, IN4 white, the same on both stepper drivers; joystick VRx yellow, VRy blue.</li>
       <li>The joystick pin labelled <b>+5V</b> goes to <b>3.3 V</b>, so its outputs stay within the ADC range.</li>
       <li>Leave the joystick centred while powering on (start-up calibration).</li>
       <li><b>GPIO 12</b> is a boot-strapping pin. If the car fails to boot, unplug the left driver's IN3 wire during power-on.</li>
-      <li class="assume">Assumed: ULN2003-style driver boards (IN1 to IN4) with a 5 V motor supply. The README lists the signal pins only, so check your driver's power markings.</li>
+      <li><b>Stepper power:</b> both drivers take + from the ESP32's <b>5V</b> pin and − from GND, so the car has no separate motor supply.</li>
+      <li class="assume">Assumed: ULN2003-style driver boards (IN1 to IN4). Check your driver's power markings.</li>
     </ul>
+
+    <h3>Breadboard layout: one ElectroCookie Mini PCB</h3>
+    <p class="sub">The same circuit with every ESP32 wire landing on the Mini PCB first. The joystick and both stepper drivers connect to the board, and nothing else touches the ESP32. Pins are named as printed on the Keyestudio ESP32 PLUS: IO27 is GPIO 27.</p>
+    <div class="scroll" id="car-bb"></div>
+    <ul>
+      <li>The board is turned so the centre channel runs top to bottom. Each row has two separate 5-hole strips: the <b>left half</b> (holes a to e) faces the ESP32 and the <b>right half</b> (holes f to j) faces away from it.</li>
+      <li>Rows are counted from the bottom of the drawing: row 1 is nearest the joystick, row 17 nearest the left stepper driver.</li>
+      <li>Every ESP32 wire runs straight to <b>hole a</b> of its row. The part that uses the signal leaves from <b>hole e</b> of the same strip and runs along the centre channel: up to the left driver, down to the right driver and the joystick.</li>
+      <li><b>Ground</b> is row 10. A jumper across the channel (hole e to hole f) joins its two halves. The ESP32 and joystick grounds sit on the left half; both driver − pins sit on the right half.</li>
+      <li><b>5 V</b> is row 12, fed from the ESP32's <b>5V</b> pin. A second jumper across the channel joins its two halves, and both driver + pins sit on the right half. The car has no separate motor supply.</li>
+      <li>Five wires are drawn across other strips, between two holes: the joystick ground and the four driver power wires. They pass over those strips and connect only at the holes marked with a dot.</li>
+      <li>Any free hole in the same strip is electrically the same, so the strip matters more than the exact hole.</li>
+      <li>Rows 1, 9, 11 and 17 are spare, and the four corner holes stay empty.</li>
+      <li class="assume">Assumed: the drivers and joystick sit off the board on wires, so their positions in the drawing are for clarity. Place them to suit the car.</li>
+    </ul>
+    <table>
+      <tr><th>Row</th><th>Left half (ESP32 side)</th><th>Right half</th></tr>
+      <tr><td>16</td><td>ESP32 IO27, left driver IN1</td><td>Spare</td></tr>
+      <tr><td>15</td><td>ESP32 IO14, left driver IN2</td><td>Spare</td></tr>
+      <tr><td>14</td><td>ESP32 IO12, left driver IN3</td><td>Spare</td></tr>
+      <tr><td>13</td><td>ESP32 IO13, left driver IN4</td><td>Spare</td></tr>
+      <tr><td>12</td><td>5 V: ESP32 5V, jumper to the right half</td><td>5 V: jumper from the left half, left driver +, right driver +</td></tr>
+      <tr><td>10</td><td>Ground: ESP32 GND, joystick GND, jumper to the right half</td><td>Ground: jumper from the left half, left driver −, right driver −</td></tr>
+      <tr><td>8</td><td>ESP32 IO32, right driver IN4</td><td>Spare</td></tr>
+      <tr><td>7</td><td>ESP32 IO33, right driver IN3</td><td>Spare</td></tr>
+      <tr><td>6</td><td>ESP32 IO25, right driver IN2</td><td>Spare</td></tr>
+      <tr><td>5</td><td>ESP32 IO26, right driver IN1</td><td>Spare</td></tr>
+      <tr><td>4</td><td>ESP32 IO34, joystick VRy</td><td>Spare</td></tr>
+      <tr><td>3</td><td>ESP32 IO35, joystick VRx</td><td>Spare</td></tr>
+      <tr><td>2</td><td>3.3 V: ESP32 3V3, joystick +5V pin</td><td>Spare</td></tr>
+    </table>
   </section>
 
   <section>
@@ -122,6 +156,7 @@
     <p class="sub">MAC C0:CD:D6:81:FF:80 · sketch <code>buttonTrigger</code> · 4 push buttons</p>
     <div class="scroll" id="buttons"></div>
     <ul>
+      <li><b>Signal wire colours:</b> button 1 yellow, button 2 blue, button 3 teal, button 4 white. The ground links are black.</li>
       <li>Each button sits between its GPIO and ground. The sketch turns on the internal pull-ups, so the buttons need no resistors and no 3.3 V wire.</li>
       <li><b>GPIO 12</b> is a boot-strapping pin that must be low at power-on. A button to ground can only pull it low, so button 3 is safe whether pressed or released. Never add an external pull-up resistor to this pin.</li>
     </ul>
@@ -133,6 +168,8 @@
     <div class="scroll" id="motors"></div>
     <ul>
       <li>Button 1 runs motor 1, and so on. Each motor runs while its button is held.</li>
+      <li><b>Signal wire colours:</b> on both drivers, DIR1 yellow, PWM1 blue, PWM2 teal, DIR2 white.</li>
+      <li><b>Motor leads:</b> red to the driver's M+ pin, black to its M− pin. The black lead is a driver output, so keep it off the ground strip.</li>
       <li>Driver VCC comes from 3V3, as on the controller.</li>
       <li>Every ground joins together: ESP32, both drivers and the motor supply.</li>
     </ul>
@@ -143,33 +180,40 @@
     <ul>
       <li>The board is turned so the centre channel runs front to back. Each row has two separate 5-hole strips: the <b>left half</b> (holes a to e) faces the ESP32 and the <b>right half</b> (holes f to j) faces the far wall.</li>
       <li>Rows are counted from the front wall: row 1 is nearest the front wall, row 17 nearest the back wall.</li>
-      <li>Both drivers straddle the channel with their pins in columns c and h. Logic pins face the ESP32, motor pins face the far wall.</li>
-      <li><b>Check before powering:</b> the ESP32 ground lands on the drivers' logic-side GND pins and the motor supply − lands on their motor-side GND pins, so the two grounds meet through the driver boards. With a multimeter, confirm that each driver's two GND pins are connected to each other. If they are separate on your boards, solder a wire on the underside from row 6 left half to row 6 right half.</li>
-      <li>Power lands on driver 1's own strips and four jumpers carry it on to driver 2, so the board needs no separate power strips.</li>
+      <li>Both drivers straddle the channel with their pins in columns c and h. Logic pins face the ESP32, motor pins face the far wall. Each driver's VCC and VM end points to the front wall, and its DIR1 and M1+ end to the back wall. This is the same driver orientation as the controller layout, turned a quarter turn.</li>
+      <li>The pin headers are centred on each driver board, so the board overhangs its pins by about 3.5 mm at each end. Driver 1 covers the middle of row 1 and driver 2 the middle of row 16; nothing is soldered there.</li>
+      <li><b>Test-fit both drivers before soldering.</b> With pins on rows 2 to 7 and 10 to 15, the two boards end up less than 1 mm apart.</li>
+      <li><b>Check before powering:</b> the ESP32 ground lands on the drivers' logic-side GND pins and the motor supply − lands on their motor-side GND pins, so the two grounds meet through the driver boards. With a multimeter, confirm that each driver's two GND pins are connected to each other. If they are separate on your boards, solder a wire on the underside from row 3 left half to row 3 right half.</li>
+      <li>The ESP32's 3V3 and GND land on driver 1's strips, and the motor supply lands on driver 2's. Four jumpers join the two drivers, so the board needs no separate power strips.</li>
       <li>Motors 1 and 2 leave through the front wall, motors 3 and 4 through the back wall. In each wall, the motor wired nearer the middle of the board takes the slot nearer the far wall, so no cables cross.</li>
       <li>Any free hole in the same strip is electrically the same. Row 1 is spare, and the four corner holes stay empty so the board seats in the cradles.</li>
     </ul>
     <table>
       <tr><th>Row</th><th>Left half (ESP32 side)</th><th>Right half (far-wall side)</th></tr>
-      <tr><td>2</td><td>Driver 1 DIR1: ESP32 IO26</td><td>Driver 1 M1+: motor 1</td></tr>
-      <tr><td>3</td><td>Driver 1 PWM1: ESP32 IO25</td><td>Driver 1 M1−: motor 1</td></tr>
-      <tr><td>4</td><td>Driver 1 PWM2: ESP32 IO17</td><td>Driver 1 M2+: motor 2</td></tr>
-      <tr><td>5</td><td>Driver 1 DIR2: ESP32 IO27</td><td>Driver 1 M2−: motor 2</td></tr>
-      <tr><td>6</td><td>Driver 1 GND: ESP32 GND, jumper to row 14</td><td>Driver 1 GND: motor supply −, jumper to row 14</td></tr>
-      <tr><td>7</td><td>Driver 1 VCC: ESP32 3V3, jumper to row 15</td><td>Driver 1 VM: motor supply +, jumper to row 15</td></tr>
-      <tr><td>10</td><td>Driver 2 DIR1: ESP32 IO13</td><td>Driver 2 M1+: motor 3</td></tr>
-      <tr><td>11</td><td>Driver 2 PWM1: ESP32 IO5</td><td>Driver 2 M1−: motor 3</td></tr>
-      <tr><td>12</td><td>Driver 2 PWM2: ESP32 IO23</td><td>Driver 2 M2+: motor 4</td></tr>
-      <tr><td>13</td><td>Driver 2 DIR2: ESP32 IO19</td><td>Driver 2 M2−: motor 4</td></tr>
-      <tr><td>14</td><td>Driver 2 GND: jumper from row 6</td><td>Driver 2 GND: jumper from row 6</td></tr>
-      <tr><td>15</td><td>Driver 2 VCC: jumper from row 7</td><td>Driver 2 VM: jumper from row 7</td></tr>
+      <tr><td>2</td><td>Driver 1 VCC: ESP32 3V3, jumper to row 10</td><td>Driver 1 VM: jumper to row 10</td></tr>
+      <tr><td>3</td><td>Driver 1 GND: ESP32 GND, jumper to row 11</td><td>Driver 1 GND: jumper to row 11</td></tr>
+      <tr><td>4</td><td>Driver 1 DIR2: ESP32 IO27</td><td>Driver 1 M2−: motor 2</td></tr>
+      <tr><td>5</td><td>Driver 1 PWM2: ESP32 IO17</td><td>Driver 1 M2+: motor 2</td></tr>
+      <tr><td>6</td><td>Driver 1 PWM1: ESP32 IO25</td><td>Driver 1 M1−: motor 1</td></tr>
+      <tr><td>7</td><td>Driver 1 DIR1: ESP32 IO26</td><td>Driver 1 M1+: motor 1</td></tr>
+      <tr><td>10</td><td>Driver 2 VCC: jumper from row 2</td><td>Driver 2 VM: motor supply +, jumper from row 2</td></tr>
+      <tr><td>11</td><td>Driver 2 GND: jumper from row 3</td><td>Driver 2 GND: motor supply −, jumper from row 3</td></tr>
+      <tr><td>12</td><td>Driver 2 DIR2: ESP32 IO19</td><td>Driver 2 M2−: motor 4</td></tr>
+      <tr><td>13</td><td>Driver 2 PWM2: ESP32 IO23</td><td>Driver 2 M2+: motor 4</td></tr>
+      <tr><td>14</td><td>Driver 2 PWM1: ESP32 IO5</td><td>Driver 2 M1−: motor 3</td></tr>
+      <tr><td>15</td><td>Driver 2 DIR1: ESP32 IO13</td><td>Driver 2 M1+: motor 3</td></tr>
     </table>
   </section>
 </main>
 
 <script>
-const C = { v5:'#e03131', v3:'#ff7b00', gnd:'#111111', vm:'#9c36b5', an:'#1c7ed6',
-            pwm:'#2f9e44', dig:'#ffd400', mot:'#868e96', usb:'#495057' };
+// Wire colours match the spools on hand: red, orange, black, blue, teal, yellow, white (brown is unused: too close to black)
+const C = { v5:'#e03131', v3:'#ff7b00', gnd:'#111111', vm:'#e03131', an:'#1c4fd6',
+            pwm:'#2ba3b8', dig:'#f2c94c', mot:'#ffffff', usb:'#495057' };
+// Signal wires take one colour per pin, in pin order: yellow, blue, teal, white
+C.s = [C.dig, C.an, C.pwm, C.mot];
+// Vibration motor leads: red to the driver's M+ pin, black to its M- pin
+C.lead = plus => plus ? C.v5 : C.gnd;
 
 function diagram(W, H) {
   const boxes = [], wires = [], tops = [];
@@ -246,9 +290,9 @@ function diagram(W, H) {
   d.text(465, 690, '3.3 V rail on the ElectroCookie board', { size: 11, fill: '#57606a' });
   d.text(480, 745, 'GND rail on the ElectroCookie board', { size: 11, fill: '#57606a' });
   // Wipers
-  d.wire(C.an, [[200, 150], [340, 150], [340, 250], [440, 250]]);
-  d.wire(C.an, [[200, 350], [370, 350], [370, 300], [440, 300]]);
-  d.wire(C.an, [[200, 550], [400, 550], [400, 350], [440, 350]]);
+  d.wire(C.s[0], [[200, 150], [340, 150], [340, 250], [440, 250]]);
+  d.wire(C.s[1], [[200, 350], [370, 350], [370, 300], [440, 300]]);
+  d.wire(C.s[2], [[200, 550], [400, 550], [400, 350], [440, 350]]);
 
   // Drivers (DFRobot DRI0044 pin order)
   d.box(800, 70, 140, 260, 'DRI0044 driver 1 (wall)', DRV);
@@ -265,8 +309,7 @@ function diagram(W, H) {
   d.text(870, 512, 'channel 2: spare', { style: 'italic', fill: '#868e96', size: 12 });
 
   // DIR / PWM
-  [100, 190, 430].forEach(y => d.wire(C.dig, [[600, y], [800, y]]));
-  [130, 160, 460].forEach(y => d.wire(C.pwm, [[600, y], [800, y]]));
+  [[100, 0], [130, 1], [160, 2], [190, 3], [430, 0], [460, 1]].forEach(([y, i]) => d.wire(C.s[i], [[600, y], [800, y]]));
 
   // Motors
   [[85, 'Wall', 'motor A', 100, 130], [155, 'Wall', 'motor B', 170, 200], [415, 'Proximity', 'motor', 430, 460]]
@@ -275,8 +318,8 @@ function diagram(W, H) {
       d.term(1000, t1, '', 'L'); d.term(1000, t2, '', 'L');
       d.text(1047, y + 27, a, { weight: 700, size: 12 });
       d.text(1047, y + 43, b, { weight: 700, size: 12 });
-      d.wire(C.mot, [[940, t1], [1000, t1]]);
-      d.wire(C.mot, [[940, t2], [1000, t2]]);
+      d.wire(C.lead(true), [[940, t1], [1000, t1]]);
+      d.wire(C.lead(false), [[940, t2], [1000, t2]]);
     });
 
   // Motor supply
@@ -306,12 +349,12 @@ function diagram(W, H) {
   // strip tints: board, row, half (0 = a-e front, 1 = f-j back)
   const tint = {};
   const T = (b, r, h, col) => { tint[b + r + h] = col; };
-  [2, 5, 8].forEach(r => T('P', r, 0, C.an));
+  [2, 5, 8].forEach((r, i) => T('P', r, 0, C.s[i]));
   T('P', 13, 0, C.v3); T('P', 15, 0, C.gnd); T('P', 15, 1, C.gnd);
   T('D', 0, 0, C.v3); T('D', 0, 1, C.vm);
   [[1, true], [9, false]].forEach(([r, both]) => {
-    T('D', r, 0, C.dig); T('D', r + 1, 0, C.pwm);
-    if (both) { T('D', r + 2, 0, C.pwm); T('D', r + 3, 0, C.dig); }
+    T('D', r, 0, C.s[0]); T('D', r + 1, 0, C.s[1]);
+    if (both) { T('D', r + 2, 0, C.s[2]); T('D', r + 3, 0, C.s[3]); }
     T('D', r + 4, 0, C.gnd); T('D', r + 5, 0, C.v3);
     T('D', r, 1, C.mot); T('D', r + 1, 1, C.mot);
     if (both) { T('D', r + 2, 1, C.mot); T('D', r + 3, 1, C.mot); }
@@ -323,7 +366,7 @@ function diagram(W, H) {
     for (let r = 0; r < 17; r++) {
       [0, 1].forEach(h => {
         const y0 = cy(top, h ? 'j' : 'e') - 8, y1 = cy(top, h ? 'f' : 'a') + 8, col = tint[b + r + h];
-        d.under(`<rect x="${rx(r) - 7}" y="${y0}" width="14" height="${y1 - y0}" rx="7" fill="${col || '#c9dccd'}" fill-opacity="${col ? 0.38 : 1}"/>`);
+        d.under(`<rect x="${rx(r) - 7}" y="${y0}" width="14" height="${y1 - y0}" rx="7" fill="${col === C.mot ? '#adb5bd' : (col || '#c9dccd')}" fill-opacity="${col ? 0.38 : 1}"/>`);
       });
       for (const c of COLS)
         d.under(`<circle cx="${rx(r)}" cy="${cy(top, c)}" r="3" fill="#fff" stroke="#74857a" stroke-width="1"/>`);
@@ -340,7 +383,7 @@ function diagram(W, H) {
   // DRI0044 driver bodies and pins
   const LOGIC = ['DIR1', 'PWM1', 'PWM2', 'DIR2', 'GND', 'VCC'], MOTOR = ['M1+', 'M1−', 'M2+', 'M2−', 'GND', 'VM'];
   [[1, 'Driver 1 (wall motors)'], [9, 'Driver 2 (proximity)']].forEach(([r0, name]) => {
-    const x0 = rx(r0) - 7;
+    const x0 = rx(r0) + 50 - 77;   // board centred over its six pins
     d.under(`<rect x="${x0}" y="224" width="154" height="152" rx="5" fill="#dbe4ff" stroke="#364fc7" stroke-width="1.5"/>`);
     d.text(x0 + 77, 297, name, { size: 11, weight: 700, fill: '#364fc7' });
     for (let i = 0; i < 6; i++) {
@@ -357,14 +400,14 @@ function diagram(W, H) {
   d.box(60, 200, 160, 480, 'Keyestudio ESP32 PLUS', '#e7f5ff');
   d.text(212, 222, 'digital header', { anchor: 'end', size: 10, fill: '#57606a' });
   d.text(212, 511, 'power + analog header', { anchor: 'end', size: 10, fill: '#57606a' });
-  [['IO19', 240, 400, 462, 1, C.dig], ['IO23', 270, 388, 471, 2, C.pwm], ['IO13', 300, 376, 480, 3, C.pwm],
-   ['IO27', 330, 364, 489, 4, C.dig], ['IO26', 360, 352, 498, 9, C.dig], ['IO25', 390, 340, 507, 10, C.pwm]]
+  [['IO19', 240, 400, 462, 1, C.s[0]], ['IO23', 270, 388, 471, 2, C.s[1]], ['IO13', 300, 376, 480, 3, C.s[2]],
+   ['IO27', 330, 364, 489, 4, C.s[3]], ['IO26', 360, 352, 498, 9, C.s[0]], ['IO25', 390, 340, 507, 10, C.s[1]]]
     .forEach(([l, ty, jx, lane, r, col]) => {
       d.term(220, ty, l, 'R');
       run(col, [[220, ty], [jx, ty], [jx, lane], [rx(r), lane], D(r, 'a')], [D(r, 'a')]);
     });
-  [['GND', 530, 400, 652, 15, C.gnd], ['3V3', 560, 388, 661, 13, C.v3], ['IO32', 590, 376, 670, 8, C.an],
-   ['IO35', 620, 364, 679, 5, C.an], ['IO34', 650, 352, 688, 2, C.an]]
+  [['GND', 530, 400, 652, 15, C.gnd], ['3V3', 560, 388, 661, 13, C.v3], ['IO32', 590, 376, 670, 8, C.s[2]],
+   ['IO35', 620, 364, 679, 5, C.s[1]], ['IO34', 650, 352, 688, 2, C.s[0]]]
     .forEach(([l, ty, jx, lane, r, col]) => {
       d.term(220, ty, l, 'R');
       run(col, [[220, ty], [jx, ty], [jx, lane], [rx(r), lane], Q(r, 'e')], [Q(r, 'e')]);
@@ -401,9 +444,9 @@ function diagram(W, H) {
       d.text(x + (name.length > 12 ? 50 : 45), 59, name, { weight: 700, size: 11 });
       d.term(t1, 80, '', 'T'); d.term(t2, 80, '', 'T');
     });
-  run(C.mot, [D(1, 'j'), [480, 128], [440, 128], [440, 80]], [D(1, 'j')]);
-  run(C.mot, [D(2, 'j'), [500, 116], [460, 116], [460, 80]], [D(2, 'j')]);
-  [3, 4, 9, 10].forEach(r => run(C.mot, [D(r, 'j'), [rx(r), 80]], [D(r, 'j')]));
+  run(C.lead(true), [D(1, 'j'), [480, 128], [440, 128], [440, 80]], [D(1, 'j')]);
+  run(C.lead(false), [D(2, 'j'), [500, 116], [460, 116], [460, 80]], [D(2, 'j')]);
+  [3, 4, 9, 10].forEach(r => run(C.lead(r % 2 === 1), [D(r, 'j'), [rx(r), 80]], [D(r, 'j')]));
 
   // pots (bottom wall)
   [[350, 'Steering pot', 376, 410, 444], [500, 'Throttle pot', 526, 560, 594], [664, 'Brake / reverse pot', 690, 740, 790]]
@@ -413,9 +456,9 @@ function diagram(W, H) {
       [[a, '3.3V'], [w, 'wiper'], [g, 'GND']].forEach(([tx, l]) => { d.term(tx, 925, '', 'T'); d.text(tx, 945, l, { size: 10 }); });
       d.text(x + wd / 2, 976, name, { weight: 700, size: 12 });
     });
-  run(C.an, [Q(8, 'a'), [620, 836], [740, 836], [740, 925]], [Q(8, 'a')]);
-  run(C.an, [Q(2, 'a'), [500, 848], [410, 848], [410, 925]], [Q(2, 'a')]);
-  run(C.an, [Q(5, 'a'), [560, 925]], [Q(5, 'a')]);
+  run(C.s[2], [Q(8, 'a'), [620, 836], [740, 836], [740, 925]], [Q(8, 'a')]);
+  run(C.s[0], [Q(2, 'a'), [500, 848], [410, 848], [410, 925]], [Q(2, 'a')]);
+  run(C.s[1], [Q(5, 'a'), [560, 925]], [Q(5, 'a')]);
   run(C.v3, [Q(13, 'b'), [710, 770], [710, 860], [526, 860], [526, 925]], [Q(13, 'b')]);
   run(C.v3, [Q(13, 'a'), [720, 872], [376, 872], [376, 925]], [Q(13, 'a')]);
   run(C.v3, [Q(13, 'c'), [712, 750], [690, 750], [690, 925]], [Q(13, 'c')]);
@@ -428,14 +471,14 @@ function diagram(W, H) {
 
 /* ---------------- 2. RC car ---------------- */
 (function () {
-  const d = diagram(1160, 740);
+  const d = diagram(1160, 640);
   const ESP = '#e7f5ff', DRV = '#fff4e6', PART = '#f1f3f5';
 
   d.box(440, 60, 160, 540, 'RC Car ESP32', ESP);
   [[120, '3V3'], [160, 'GPIO 35'], [200, 'GPIO 34'], [240, 'GND']]
     .forEach(([y, l]) => d.term(440, y, l, 'L'));
   [[110, 'GPIO 27'], [140, 'GPIO 14'], [170, 'GPIO 12'], [200, 'GPIO 13'],
-   [370, 'GPIO 26'], [400, 'GPIO 25'], [430, 'GPIO 33'], [460, 'GPIO 32'], [560, 'GND']]
+   [370, 'GPIO 26'], [400, 'GPIO 25'], [430, 'GPIO 33'], [460, 'GPIO 32'], [530, '5V'], [560, 'GND']]
     .forEach(([y, l]) => d.term(600, y, l, 'R'));
 
   // Joystick
@@ -443,8 +486,8 @@ function diagram(W, H) {
   [[120, '+5V pin'], [160, 'VRx'], [200, 'VRy'], [240, 'GND'], [280, 'SW (unused)']]
     .forEach(([y, l]) => d.term(230, y, l, 'R'));
   d.wire(C.v3, [[230, 120], [440, 120]]);
-  d.wire(C.an, [[230, 160], [440, 160]]);
-  d.wire(C.an, [[230, 200], [440, 200]]);
+  d.wire(C.s[0], [[230, 160], [440, 160]]);
+  d.wire(C.s[1], [[230, 200], [440, 200]]);
   d.wire(C.gnd, [[230, 240], [440, 240]]);
 
   // Stepper drivers
@@ -452,7 +495,7 @@ function diagram(W, H) {
     d.box(800, y, 140, 210, t, DRV);
     ['IN1', 'IN2', 'IN3', 'IN4'].forEach((l, i) => {
       d.term(800, y0 + i * 30, l, 'L');
-      d.wire(C.dig, [[600, y0 + i * 30], [800, y0 + i * 30]]);
+      d.wire(C.s[i], [[600, y0 + i * 30], [800, y0 + i * 30]]);
     });
     d.term(800, y + 155, '+ (5V)', 'L');
     d.term(800, y + 185, '− (GND)', 'L');
@@ -466,17 +509,104 @@ function diagram(W, H) {
     d.text(970, y + 128, 'plug', { size: 11, fill: '#57606a' });
   });
 
-  // Motor supply rails
-  d.box(660, 650, 120, 70, '', '#fff5f5');
-  d.term(700, 650, '+', 'T'); d.term(740, 650, '−', 'T');
-  d.text(720, 712, '5 V motor supply', { weight: 700, size: 12 });
-  d.wire(C.v5, [[800, 235], [700, 235], [700, 650]]);
+  // Stepper power: both drivers run from the ESP32's 5V pin and GND
+  d.wire(C.v5, [[600, 530], [700, 530], [700, 235], [800, 235]]);
   d.wire(C.v5, [[700, 495], [800, 495]]); d.dot(700, 495, C.v5);
-  d.wire(C.gnd, [[800, 265], [740, 265], [740, 650]]);
+  d.wire(C.gnd, [[600, 560], [740, 560], [740, 265], [800, 265]]);
   d.wire(C.gnd, [[740, 525], [800, 525]]); d.dot(740, 525, C.gnd);
-  d.wire(C.gnd, [[600, 560], [740, 560]]); d.dot(740, 560, C.gnd);
 
   d.render('car');
+})();
+
+/* ---------------- 2b. RC car breadboard layout (one Mini PCB, turned) ---------------- */
+(function () {
+  const d = diagram(1020, 1035);
+  const P = 30, BX = 440, BW = 426, BTOP = 270, BH = 576;
+  const COLS = 'abcdefghij';
+  const ry = r => BTOP + BH - 48 - r * P;                // r = 0..16, printed as row r + 1
+  const cx = c => { const i = COLS.indexOf(c); return BX + (i < 5 ? 48 + i * P : 258 + (i - 5) * P); };
+  const H = (r, c) => [cx(c), ry(r)];
+  const lane = k => cx('e') + 13.5 + k * 9;              // wire lanes inside the centre channel
+  const PART = '#f1f3f5', DRV = '#fff4e6';
+
+  // ESP32 nets: row, label, colour. Every one lands on hole a of its row.
+  const NETS = [
+    [1, '3V3', C.v3], [2, 'IO35', C.s[0]], [3, 'IO34', C.s[1]],
+    [4, 'IO26', C.s[0]], [5, 'IO25', C.s[1]], [6, 'IO33', C.s[2]], [7, 'IO32', C.s[3]],
+    [9, 'GND', C.gnd], [11, '5V', C.v5],
+    [12, 'IO13', C.s[3]], [13, 'IO12', C.s[2]], [14, 'IO14', C.s[1]], [15, 'IO27', C.s[0]]];
+
+  // strip tints: row, half (0 = a-e ESP32 side, 1 = f-j far side)
+  const tint = { '9:1': C.gnd, '11:1': C.v5 };
+  NETS.forEach(([r, , col]) => { tint[r + ':0'] = col; });
+
+  d.under(`<rect x="${BX}" y="${BTOP}" width="${BW}" height="${BH}" rx="10" fill="#e3f1e6" stroke="#2b6a3c" stroke-width="2"/>`);
+  for (let r = 0; r < 17; r++) {
+    [0, 1].forEach(h => {
+      const x0 = cx(h ? 'f' : 'a') - 9, x1 = cx(h ? 'j' : 'e') + 9, col = tint[r + ':' + h];
+      d.under(`<rect x="${x0}" y="${ry(r) - 8}" width="${x1 - x0}" height="16" rx="8" fill="${col === C.mot ? '#adb5bd' : (col || '#c9dccd')}" fill-opacity="${col ? 0.38 : 1}"/>`);
+    });
+    for (const c of COLS)
+      d.under(`<circle cx="${cx(c)}" cy="${ry(r)}" r="3.4" fill="#fff" stroke="#74857a" stroke-width="1"/>`);
+    d.text(BX + 20, ry(r) - 6, r + 1, { size: 9, fill: '#57606a' });
+  }
+  for (const c of COLS) d.text(cx(c), BTOP + BH - 12, c, { size: 10, fill: '#57606a' });
+  d.text(BX, BTOP - 9, 'ElectroCookie Mini PCB', { size: 12, weight: 700, anchor: 'start' });
+
+  const run = (col, pts, ends) => { d.wire(col, pts); (ends || [pts[0], pts[pts.length - 1]]).forEach(e => d.dot(e[0], e[1], col)); };
+
+  // ESP32 (drawn by label): every wire runs straight to hole a of its row
+  d.box(60, 320, 160, 478, 'Keyestudio ESP32 PLUS', '#e7f5ff');
+  NETS.forEach(([r, l, col]) => {
+    d.term(220, ry(r), l, 'R');
+    run(col, [[220, ry(r)], H(r, 'a')], [H(r, 'a')]);
+  });
+
+  // stepper drivers: left above the board, right below it. Terminals in order IN1 to IN4, then - and +
+  const TX = [607, 641, 675, 709, 743, 773], TL = ['IN1', 'IN2', 'IN3', 'IN4', '−', '+'];
+  [[70, 150, 'Left'], [935, 935, 'Right']].forEach(([y, ty, name]) => {
+    d.box(585, y, 215, 80, '', DRV);
+    TX.forEach((x, i) => { d.term(x, ty, '', 'T'); d.text(x, ty === y ? y + 20 : ty - 11, TL[i], { size: 10 }); });
+    const my = ty === y ? y + 52 : y + 28;
+    d.text(672, my + 4, name + ' stepper driver', { weight: 700, size: 12 });
+    d.term(800, my, 'Motor', 'R');
+    d.box(860, my - 35, 120, 70, '', PART);
+    d.term(860, my, '', 'L');
+    d.text(922, my - 4, name, { weight: 700, size: 12 });
+    d.text(922, my + 12, 'stepper', { weight: 700, size: 12 });
+    d.wire(C.mot, [[800, my], [860, my]], { width: 7 });
+    d.text(830, my - 14, '5-wire', { size: 11, fill: '#57606a' });
+    d.text(830, my + 24, 'plug', { size: 11, fill: '#57606a' });
+  });
+
+  // left driver signals: hole e, up the centre channel, out of the top of the board
+  [[15, 0, 607, 240], [14, 1, 641, 240], [13, 2, 675, 249], [12, 3, 709, 258]].forEach(([r, k, tx, lv], i) =>
+    run(C.s[i], [H(r, 'e'), [lane(k), ry(r)], [lane(k), lv], [tx, lv], [tx, 150]], [H(r, 'e')]));
+  // right driver signals: hole e, down the centre channel, out of the bottom of the board
+  [[4, 3, 607, 894], [5, 4, 641, 903], [6, 5, 675, 867], [7, 6, 709, 858]].forEach(([r, k, tx, lv], i) =>
+    run(C.s[i], [H(r, 'e'), [lane(k), ry(r)], [lane(k), lv], [tx, lv], [tx, 935]], [H(r, 'e')]));
+
+  // joystick (below the board): 3.3 V and the two axes come down the channel
+  d.box(375, 935, 186, 80, '', PART);
+  [[400, 'GND'], [434, '+5V'], [468, 'VRx'], [502, 'VRy'], [536, 'SW']]
+    .forEach(([x, l]) => { d.term(x, 935, '', 'T'); d.text(x, 955, l, { size: 10 }); });
+  d.text(468, 984, 'Joystick module', { weight: 700, size: 12 });
+  d.text(468, 1000, 'SW unused', { size: 11, fill: '#57606a' });
+  [[1, 0, 434, 867, C.v3], [2, 1, 468, 876, C.s[0]], [3, 2, 502, 885, C.s[1]]].forEach(([r, k, tx, lv, col]) =>
+    run(col, [H(r, 'e'), [lane(k), ry(r)], [lane(k), lv], [tx, lv], [tx, 935]], [H(r, 'e')]));
+  // joystick ground: from the ground strip, over the strips below it (between holes b and c)
+  run(C.gnd, [H(9, 'b'), [533, ry(9) + 15], [533, 858], [400, 858], [400, 935]], [H(9, 'b')]);
+
+  // ground and 5 V jumpers across the centre channel
+  run(C.gnd, [H(9, 'e'), H(9, 'f')]);
+  run(C.v5, [H(11, 'e'), H(11, 'f')]);
+  // driver power, running over the right-half strips between holes
+  run(C.gnd, [H(9, 'h'), [743, ry(9) - 15], [743, 150]], [H(9, 'h')]);    // left driver -
+  run(C.v5,  [H(11, 'i'), [773, ry(11) - 15], [773, 150]], [H(11, 'i')]); // left driver +
+  run(C.gnd, [H(9, 'g'), [743, ry(9) + 15], [743, 935]], [H(9, 'g')]);    // right driver -
+  run(C.v5,  [H(11, 'h'), [773, ry(11) + 15], [773, 935]], [H(11, 'h')]); // right driver +
+
+  d.render('car-bb');
 })();
 
 /* ---------------- 3. Bridge ---------------- */
@@ -513,7 +643,7 @@ function diagram(W, H) {
     d.term(640, y, 'leg 1', 'L');
     d.term(640, y + 25, 'leg 2', 'L');
     d.text(770, y + 17, 'Button ' + (i + 1), { weight: 700 });
-    d.wire(C.dig, [[460, y], [640, y]]);
+    d.wire(C.s[i], [[460, y], [640, y]]);
   });
   d.wire(C.gnd, [[460, 370], [560, 370], [560, 125], [640, 125]]);
   [195, 265, 335].forEach(y => { d.wire(C.gnd, [[560, y], [640, y]]); d.dot(560, y, C.gnd); });
@@ -535,14 +665,13 @@ function diagram(W, H) {
       .forEach(([dy, l]) => d.term(420, y + dy, l, 'L'));
     [[30, 'M1+'], [60, 'M1−'], [100, 'M2+'], [130, 'M2−'], [180, 'GND'], [220, 'VM']]
       .forEach(([dy, l]) => d.term(560, y + dy, l, 'R'));
-    [30, 120].forEach(dy => d.wire(C.dig, [[220, y + dy], [420, y + dy]]));
-    [60, 90].forEach(dy => d.wire(C.pwm, [[220, y + dy], [420, y + dy]]));
+    [30, 60, 90, 120].forEach((dy, i) => d.wire(C.s[i], [[220, y + dy], [420, y + dy]]));
     [[15, 30, 60, n], [85, 100, 130, n + 1]].forEach(([by, t1, t2, m]) => {
       d.box(620, y + by, 85, 60, '', PART);
       d.term(620, y + t1, '', 'L'); d.term(620, y + t2, '', 'L');
       d.text(667, y + by + 35, 'Motor ' + m, { weight: 700, size: 12 });
-      d.wire(C.mot, [[560, y + t1], [620, y + t1]]);
-      d.wire(C.mot, [[560, y + t2], [620, y + t2]]);
+      d.wire(C.lead(true), [[560, y + t1], [620, y + t1]]);
+      d.wire(C.lead(false), [[560, y + t2], [620, y + t2]]);
     });
   });
 
@@ -575,15 +704,15 @@ function diagram(W, H) {
   // strip tints: row, half (0 = a-e ESP32 side, 1 = f-j far-wall side)
   const tint = {};
   [1, 9].forEach(r => {
-    [[0, C.dig], [1, C.pwm], [2, C.pwm], [3, C.dig], [4, C.gnd], [5, C.v3]].forEach(([o, col]) => { tint[(r + o) + ':0'] = col; });
-    [[0, C.mot], [1, C.mot], [2, C.mot], [3, C.mot], [4, C.gnd], [5, C.vm]].forEach(([o, col]) => { tint[(r + o) + ':1'] = col; });
+    [[0, C.v3], [1, C.gnd], [2, C.s[3]], [3, C.s[2]], [4, C.s[1]], [5, C.s[0]]].forEach(([o, col]) => { tint[(r + o) + ':0'] = col; });
+    [[0, C.vm], [1, C.gnd], [2, C.mot], [3, C.mot], [4, C.mot], [5, C.mot]].forEach(([o, col]) => { tint[(r + o) + ':1'] = col; });
   });
 
   d.under(`<rect x="${BX}" y="${BTOP}" width="${BW}" height="${BH}" rx="10" fill="#e3f1e6" stroke="#2b6a3c" stroke-width="2"/>`);
   for (let r = 0; r < 17; r++) {
     [0, 1].forEach(h => {
       const x0 = cx(h ? 'f' : 'a') - 9, x1 = cx(h ? 'j' : 'e') + 9, col = tint[r + ':' + h];
-      d.under(`<rect x="${x0}" y="${ry(r) - 8}" width="${x1 - x0}" height="16" rx="8" fill="${col || '#c9dccd'}" fill-opacity="${col ? 0.38 : 1}"/>`);
+      d.under(`<rect x="${x0}" y="${ry(r) - 8}" width="${x1 - x0}" height="16" rx="8" fill="${col === C.mot ? '#adb5bd' : (col || '#c9dccd')}" fill-opacity="${col ? 0.38 : 1}"/>`);
     });
     for (const c of COLS)
       d.under(`<circle cx="${cx(c)}" cy="${ry(r)}" r="3.4" fill="#fff" stroke="#74857a" stroke-width="1"/>`);
@@ -592,11 +721,13 @@ function diagram(W, H) {
   for (const c of COLS) d.text(cx(c), 613, c, { size: 10, fill: '#57606a' });
   d.text(620, 138, 'ElectroCookie Mini PCB', { size: 12, weight: 700 });
 
-  // DRI0044 driver bodies and pins
-  const LOGIC = ['DIR1', 'PWM1', 'PWM2', 'DIR2', 'GND', 'VCC'], MOTOR = ['M1+', 'M1−', 'M2+', 'M2−', 'GND', 'VM'];
+  // DRI0044 driver bodies and pins, same handedness as the controller layout turned a quarter turn:
+  // with the logic pins facing the ESP32 (left), DIR1 is at the back-wall end and VCC at the front-wall end.
+  // Listed from the front-wall end (lowest row) upward.
+  const LOGIC = ['VCC', 'GND', 'DIR2', 'PWM2', 'PWM1', 'DIR1'], MOTOR = ['VM', 'GND', 'M2−', 'M2+', 'M1−', 'M1+'];
   [[1, 'Driver 1 (motors 1, 2)'], [9, 'Driver 2 (motors 3, 4)']].forEach(([r0, name]) => {
-    const yb = ry(r0) + 8, yt = yb - 183;
-    d.under(`<rect x="526" y="${yt}" width="188" height="183" rx="5" fill="#dbe4ff" stroke="#364fc7" stroke-width="1.5"/>`);
+    const yb = ry(r0) + 32, yt = yb - 184;   // board centred over its six pins
+    d.under(`<rect x="526" y="${yt}" width="188" height="184" rx="5" fill="#dbe4ff" stroke="#364fc7" stroke-width="1.5"/>`);
     d.text(640, (yb + yt) / 2, name, { size: 11, weight: 700, fill: '#364fc7', rot: -90 });
     for (let i = 0; i < 6; i++) {
       const y = ry(r0 + i);
@@ -609,41 +740,42 @@ function diagram(W, H) {
   const run = (col, pts, ends) => { d.wire(col, pts); (ends || [pts[0], pts[pts.length - 1]]).forEach(e => d.dot(e[0], e[1], col)); };
 
   // ESP32 (drawn by label): every wire runs straight to hole a of its row
-  d.box(60, 250, 160, 350, 'Keyestudio ESP32 PLUS', '#e7f5ff');
-  [[1, 'IO26', C.dig], [2, 'IO25', C.pwm], [3, 'IO17', C.pwm], [4, 'IO27', C.dig], [5, 'GND', C.gnd], [6, '3V3', C.v3],
-   [9, 'IO13', C.dig], [10, 'IO5', C.pwm], [11, 'IO23', C.pwm], [12, 'IO19', C.dig]]
+  d.box(60, 222, 160, 378, 'Keyestudio ESP32 PLUS', '#e7f5ff');
+  [[1, '3V3', C.v3], [2, 'GND', C.gnd], [3, 'IO27', C.s[3]], [4, 'IO17', C.s[2]], [5, 'IO25', C.s[1]], [6, 'IO26', C.s[0]],
+   [11, 'IO19', C.s[3]], [12, 'IO23', C.s[2]], [13, 'IO5', C.s[1]], [14, 'IO13', C.s[0]]]
     .forEach(([r, l, col]) => {
       d.term(220, ry(r), l, 'R');
       run(col, [[220, ry(r)], H(r, 'a')], [H(r, 'a')]);
     });
 
-  // jumpers from driver 1 to driver 2
-  run(C.gnd, [H(5, 'b'), [500, ry(5) - 12], [500, ry(13) + 12], H(13, 'a')]);
-  run(C.v3,  [H(6, 'b'), [519, ry(6) - 9], [519, ry(14) + 9], H(14, 'b')]);
-  run(C.vm,  [H(6, 'i'), [721, ry(6) - 9], [721, ry(14) + 9], H(14, 'i')]);
-  run(C.gnd, [H(5, 'i'), [740, ry(5) - 12], [740, ry(13) + 12], H(13, 'j')]);
+  // jumpers between driver 1 and driver 2
+  run(C.v3,  [H(1, 'b'), [500, ry(1) - 12], [500, ry(9) + 12], H(9, 'a')]);
+  run(C.gnd, [H(2, 'b'), [520, ry(2) - 9], [520, ry(10) + 9], H(10, 'b')]);
+  run(C.vm,  [H(1, 'i'), [740, ry(1) - 12], [740, ry(9) + 12], H(9, 'i')]);
+  run(C.gnd, [H(2, 'i'), [718, ry(2) - 9], [718, ry(10) + 9], H(10, 'i')]);
 
-  // motor supply (far wall)
-  d.box(960, 390, 130, 120, '', '#f3f0ff');
-  d.term(960, ry(6), '+', 'L'); d.term(960, ry(5), '−', 'L');
-  d.text(1040, 446, 'Motor supply', { weight: 700, size: 12 });
-  d.text(1040, 462, 'to suit motors', { size: 12 });
-  run(C.vm, [H(6, 'j'), [960, ry(6)]], [H(6, 'j')]);
-  run(C.gnd, [H(5, 'j'), [960, ry(5)]], [H(5, 'j')]);
+  // motor supply (far wall), landing on driver 2's VM and GND strips
+  d.box(960, 294, 130, 120, '', '#f3f0ff');
+  d.term(960, ry(9), '+', 'L'); d.term(960, ry(10), '−', 'L');
+  d.text(1040, 350, 'Motor supply', { weight: 700, size: 12 });
+  d.text(1040, 366, 'to suit motors', { size: 12 });
+  run(C.vm, [H(9, 'j'), [960, ry(9)]], [H(9, 'j')]);
+  run(C.gnd, [H(10, 'j'), [960, ry(10)]], [H(10, 'j')]);
 
   // vibration motors: 1 and 2 through the front wall (bottom), 3 and 4 through the back wall (top)
-  [[736, 680, 'Motor 1'], [822, 680, 'Motor 2'], [736, 50, 'Motor 4'], [822, 50, 'Motor 3']].forEach(([x, y, name]) => {
+  [[736, 680, 'Motor 2'], [822, 680, 'Motor 1'], [736, 50, 'Motor 3'], [822, 50, 'Motor 4']].forEach(([x, y, name]) => {
     d.box(x, y, 84, 50, '', '#f1f3f5');
     d.text(x + 42, y + 30, name, { weight: 700, size: 12 });
     const ty = y > 300 ? y : y + 50;
     d.term(x + 30, ty, '', 'T'); d.term(x + 54, ty, '', 'T');
   });
-  [[1, 766, 680], [2, 790, 680], [3, 852, 680], [4, 876, 680],
-   [9, 876, 100], [10, 852, 100], [11, 790, 100], [12, 766, 100]]
-    .forEach(([r, x, y]) => run(C.mot, [H(r, 'j'), [x, ry(r)], [x, y]], [H(r, 'j')]));
+  // even rows (as counted from 0) are the M+ pins
+  [[3, 766, 680], [4, 790, 680], [5, 852, 680], [6, 876, 680],
+   [14, 766, 100], [13, 790, 100], [12, 852, 100], [11, 876, 100]]
+    .forEach(([r, x, y]) => run(C.lead(r % 2 === 0), [H(r, 'j'), [x, ry(r)], [x, y]], [H(r, 'j')]));
   d.text(700, 710, 'front wall', { size: 11, fill: '#57606a', anchor: 'end' });
   d.text(700, 80, 'back wall', { size: 11, fill: '#57606a', anchor: 'end' });
-  d.text(1025, 380, 'far wall', { size: 11, fill: '#57606a' });
+  d.text(1025, 284, 'far wall', { size: 11, fill: '#57606a' });
 
   d.render('motors-bb');
 })();
