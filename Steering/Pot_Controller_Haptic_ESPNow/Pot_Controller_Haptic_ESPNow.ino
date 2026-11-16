@@ -30,7 +30,7 @@ const unsigned long PRINT_INTERVAL_MS = 250;
 const unsigned long PROX_TIMEOUT_MS = 500;
 
 const bool INVERT_STEERING = false;
-const bool INVERT_THROTTLE = false;
+const bool INVERT_THROTTLE = true;   // throttle pot rests at 4095 and falls when pressed
 
 struct __attribute__((packed)) ControlPacket {
   uint32_t seq;
