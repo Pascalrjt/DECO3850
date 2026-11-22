@@ -5,7 +5,7 @@
 // Motor 1 (Left) pins
 #define M1_IN1 27
 #define M1_IN2 14
-#define M1_IN3 12
+#define M1_IN3 16   // not GPIO 12: that pin sets the flash voltage at boot and blocked start-up
 #define M1_IN4 13
 
 // Motor 2 (Right) pins
