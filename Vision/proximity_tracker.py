@@ -19,6 +19,8 @@ import numpy as np
 import serial
 from serial.tools import list_ports
 
+import leaderboard as lb
+
 # ---------------------------------------------------------------------------
 # Serial protocol (must match ProximityBridge_ESPNow / Pot_Controller)
 # ---------------------------------------------------------------------------
@@ -325,6 +327,8 @@ LOUPE_SOURCE = 32                 # pixels around the cursor shown in the zoomed
 LOUPE_SCALE = 4
 CORNER_GRAB_RADIUS = 18           # how close a click must be to drag a corner in the grid check
 MASK_INSET_W = 170
+KEY_ESCAPE = 27
+KEY_SPACE = 32
 KEY_ENTER = (13, 10)
 KEY_BACKSPACE = (8, 127)
 CORNER_NAMES = ["top-left", "top-right", "bottom-right", "bottom-left"]
@@ -338,6 +342,10 @@ GOAL_YELLOW = (0, 215, 255)
 RED = (77, 77, 255)
 
 HELP_LINES = [
+    ("N", "new team: type its name"),
+    ("Space", "start the run"),
+    ("X", "abort the run"),
+    ("U", "undo the last result"),
     ("Enter", "confirm the current step"),
     ("Backspace", "undo the last corner"),
     ("R", "redo the whole setup"),
@@ -413,6 +421,20 @@ class ProximityTracker:
         self.pending_since = 0.0
         self.ignored_px: list[tuple[int, int]] = []         # blobs rejected this frame, for the overlay
         self.ignored_total = 0
+
+        # Leaderboard run: idle -> ready (team named) -> running -> finished / timeout
+        self.board: lb.Leaderboard | None = None
+        self.live: lb.LiveState | None = None
+        self.run_phase = "idle"
+        self.team: str | None = None
+        self.run_start = 0.0
+        self.run_elapsed = 0.0
+        self.closest_mm: float | None = None
+        self.arrived_since: float | None = None     # when the car entered the goal ring
+        self.run_result: dict | None = None         # result card for the run that just ended
+        self.name_buffer: str | None = None         # team name being typed; None when not typing
+        self.notice = ""                            # one-line message for the overseer
+        self.notice_until = 0.0
         self.cursor = (0, 0)
         self.drag_index: int | None = None      # corner being dragged in the grid check
         self.saved_setup: dict | None = None    # setup offered for reuse at start-up
@@ -931,6 +953,107 @@ class ProximityTracker:
         return (cx, cy), mask
 
     # ------------------------------------------------------------------
+    # Leaderboard runs
+    # ------------------------------------------------------------------
+    def attach_leaderboard(self, board, live) -> None:
+        self.board = board
+        self.live = live
+
+    def say(self, text: str, now: float | None = None, seconds: float = 4.0) -> None:
+        """Show a short message to the overseer, in the window and the terminal."""
+        print(text)
+        self.notice = text
+        self.notice_until = (time.monotonic() if now is None else now) + seconds
+
+    def begin_name_entry(self) -> None:
+        if self.board is None:
+            self.say("The leaderboard is switched off.")
+        elif self.run_phase == "running":
+            self.say("A run is in progress. Press X to abort it first.")
+        else:
+            self.name_buffer = ""
+
+    def commit_name(self) -> None:
+        name = (self.name_buffer or "").strip()
+        if not name:
+            self.say("Type a team name first, or press Esc to cancel.")
+            return
+        if self.board.name_taken(name):
+            self.say(f"{name} is already on the board. Pick another name.")
+            return
+        self.team = name
+        self.name_buffer = None
+        self.run_phase = "ready"
+        self.run_result = None
+        self.say(f"{name} is ready. Press Space to start the clock.")
+
+    def start_run(self, now: float) -> None:
+        if self.run_phase != "ready":
+            self.say("Press N and enter a team name first.", now)
+        elif self.state != "TRACKING":
+            self.say("Finish the setup before starting a run.", now)
+        else:
+            self.run_phase = "running"
+            self.run_start = now
+            self.run_elapsed = 0.0
+            self.closest_mm = None
+            self.arrived_since = None
+            self.say(f"Run started for {self.team}.", now)
+
+    def abort_run(self, now: float) -> None:
+        if self.run_phase == "running":
+            self.run_phase = "ready"
+            self.run_elapsed = 0.0
+            self.say(f"Run aborted. {self.team} can start again with Space.", now)
+
+    def undo_last_result(self, now: float) -> None:
+        if self.board is None or self.run_phase == "running":
+            return
+        entry = self.board.undo_last()
+        if entry is None:
+            self.say("There is no result to undo.", now)
+            return
+        if self.run_result and self.run_result.get("id") == entry["id"]:
+            self.run_result = None
+            self.run_phase = "idle"
+            self.team = None
+        self.say(f"Removed the result for {entry['team']}. Restore it from the manage page if needed.", now)
+
+    def _finish_run(self, finished: bool, now: float) -> None:
+        distance = None if finished else self.last_distance_mm
+        entry = self.board.add(self.team, finished, self.run_elapsed, distance)
+        self.run_result = dict(self.board.describe(entry["id"]), id=entry["id"])
+        self.run_phase = "finished" if finished else "timeout"
+        if finished:
+            self.say(f"{self.team} reached the goal in {lb.format_time(self.run_elapsed)}: "
+                     f"{self.run_result.get('place_text', '')}.", now, 8.0)
+        else:
+            self.say(f"Time's up for {self.team}: {self.run_result.get('result', '')}, "
+                     f"{self.run_result.get('place_text', '')}.", now, 8.0)
+
+    def update_run(self, distance_mm, valid: bool, now: float) -> None:
+        """Advance the run clock and decide whether the run has ended."""
+        if self.run_phase == "running":
+            self.run_elapsed = min(now - self.run_start, lb.RUN_LIMIT_S)
+            if valid and distance_mm is not None:
+                self.closest_mm = distance_mm if self.closest_mm is None else min(self.closest_mm, distance_mm)
+                # Finish: the car has stayed inside the goal ring for a moment
+                if distance_mm < ARRIVAL_THRESHOLD_MM:
+                    if self.arrived_since is None:
+                        self.arrived_since = now
+                    elif now - self.arrived_since >= lb.ARRIVAL_DWELL_S:
+                        self._finish_run(True, now)
+                else:
+                    self.arrived_since = None
+            if self.run_phase == "running" and now - self.run_start >= lb.RUN_LIMIT_S:
+                self._finish_run(False, now)
+        if self.live is not None:
+            self.live.set(phase=self.run_phase, team=self.team, elapsed_s=self.run_elapsed,
+                          remaining_s=max(0.0, lb.RUN_LIMIT_S - self.run_elapsed),
+                          distance_mm=distance_mm if valid else self.last_distance_mm,
+                          closest_mm=self.closest_mm, result=self.run_result)
+
+    # ------------------------------------------------------------------
     # Coordinate transform + distance
     # ------------------------------------------------------------------
     def pixel_to_maze_mm(self, px, py):
@@ -1065,9 +1188,27 @@ class ProximityTracker:
         else:
             self._draw_step_banner(canvas)
         put(canvas, self._footer_text(), (10, canvas.shape[0] - 9), YELLOW, 0.48)
+        if self.notice and now < self.notice_until:
+            draw_label(canvas, self.notice, (12, TOP_BAR_H + 22), WHITE, 0.5)
+        if self.name_buffer is not None:
+            self._draw_name_card(canvas, now)
         if self.show_help:
             self._draw_help_card(canvas)
         return canvas
+
+    def _draw_name_card(self, frame, now: float) -> None:
+        height, width = frame.shape[:2]
+        card_w, card_h = 400, 140
+        x0, y0 = (width - card_w) // 2, (height - card_h) // 2
+        shade(frame, x0, y0, x0 + card_w, y0 + card_h, 0.86)
+        cv2.rectangle(frame, (x0, y0), (x0 + card_w, y0 + card_h), GREY, 1)
+        put(frame, "Team name", (x0 + 20, y0 + 32), WHITE, 0.65, 2)
+        cv2.rectangle(frame, (x0 + 20, y0 + 46), (x0 + card_w - 20, y0 + 84), (48, 35, 29), -1)
+        cv2.rectangle(frame, (x0 + 20, y0 + 46), (x0 + card_w - 20, y0 + 84), YELLOW, 1)
+        cursor = "|" if int(now * 2) % 2 == 0 else ""
+        put(frame, (self.name_buffer or "") + cursor, (x0 + 30, y0 + 72), WHITE, 0.65)
+        put(frame, "[Enter] save name", (x0 + 20, y0 + 118), OK_GREEN, 0.5)
+        put(frame, "[Esc] cancel", (x0 + 220, y0 + 118), YELLOW, 0.5)
 
     def _draw_grid(self, frame) -> None:
         """Cell grid from the calibration: lines should run through the posts."""
@@ -1127,6 +1268,24 @@ class ProximityTracker:
             cv2.circle(frame, (light_x, 31), 17, (128, 114, 107), 2, cv2.LINE_AA)
             put(frame, "no pulses", (light_x + 30, 36), (175, 163, 154), 0.6)
 
+        # leaderboard run: team and clock, between the pulse light and the status lights
+        run_x = light_x + 250
+        if self.board is not None and width - 200 - run_x >= 190:
+            if self.run_phase == "running":
+                put(frame, lb.format_time(self.run_elapsed), (run_x, 34), WHITE, 0.95, 2)
+                put(frame, f"{self.team}  ({lb.format_time(lb.RUN_LIMIT_S - self.run_elapsed + 0.999)} left)",
+                    (run_x, 53), GOAL_YELLOW, 0.42)
+            elif self.run_phase == "ready":
+                put(frame, self.team or "", (run_x, 28), GOAL_YELLOW, 0.6)
+                put(frame, "ready: Space starts the clock", (run_x, 51), GREY, 0.42)
+            elif self.run_phase in ("finished", "timeout") and self.run_result:
+                heading = "Goal reached" if self.run_phase == "finished" else "Time's up"
+                put(frame, f"{heading}: {self.run_result.get('result', '')}", (run_x, 28), OK_GREEN, 0.55)
+                put(frame, f"{self.team}, {self.run_result.get('place_text', '')}", (run_x, 51), GREY, 0.42)
+            else:
+                put(frame, "No team", (run_x, 28), GREY, 0.6)
+                put(frame, "N enters the next team", (run_x, 51), GREY, 0.42)
+
         # connection lights
         status_x = max(light_x + 230, width - 200)
         bridge_text = ("Bridge connected" if self.bridge_ok
@@ -1184,6 +1343,16 @@ class ProximityTracker:
             return "Click the arrow, then tune with the tolerance sliders    [H] help"
         if self.state == "SET_DESTINATION":
             return "Click the new goal    [G] back to the fixed goal    [H] help"
+        if self.name_buffer is not None:
+            return "Type the team name    [Enter] save    [Esc] cancel"
+        if self.board is not None:
+            if self.run_phase == "running":
+                return "[X] abort run    [H] help    [Z] zones    [M] mask"
+            if self.run_phase == "ready":
+                return "[Space] start run    [N] change team    [H] help    [Q] quit"
+            if self.run_phase in ("finished", "timeout"):
+                return "[N] next team    [U] undo this result    [H] help    [Q] quit"
+            return "[N] new team    [U] undo last result    [H] help    [Z] zones    [M] mask    [Q] quit"
         return "[H] help    [Z] zones    [M] mask    [D] new goal    [C] colour    [R] redo setup    [Q] quit"
 
     def _draw_resume_card(self, frame) -> None:
@@ -1267,13 +1436,46 @@ class ProximityTracker:
             # Preview the mask live while the user adjusts tolerances.
             _, mask = self.detect_arrow(frame)
 
+        self.update_run(distance_mm, valid, now)
         canvas = self.draw_overlay(frame, car_px, distance_mm, valid, mask, params or (0, 0, 0, 0))
         return params, mask, canvas
 
     def handle_key(self, key: int) -> bool:
         """Act on a key press. Returns False when the tracker should quit."""
+        now = time.monotonic()
+        if key == 255:
+            return True                          # no key pressed
+
+        # Typing a team name: every key goes to the name
+        if self.name_buffer is not None:
+            if key in KEY_ENTER:
+                self.commit_name()
+            elif key == KEY_ESCAPE:
+                self.name_buffer = None
+            elif key in KEY_BACKSPACE:
+                self.name_buffer = self.name_buffer[:-1]
+            elif 32 <= key <= 126 and len(self.name_buffer) < lb.MAX_TEAM_NAME:
+                self.name_buffer += chr(key)
+            return True
+
         if key == ord("q"):
             return False
+        if key == ord("n"):
+            self.begin_name_entry()
+            return True
+        if key == KEY_SPACE:
+            self.start_run(now)
+            return True
+        if key == ord("x"):
+            self.abort_run(now)
+            return True
+        if key == ord("u"):
+            self.undo_last_result(now)
+            return True
+        if self.run_phase == "running" and key in (ord("r"), ord("c"), ord("d"), ord("g"),
+                                                   *KEY_BACKSPACE):
+            self.say("Not during a run. Press X to abort the run first.", now)
+            return True
         if key == ord("h"):
             self.show_help = not self.show_help
         elif key in KEY_ENTER:
@@ -1305,6 +1507,15 @@ class ProximityTracker:
                 self.state = "PICK_COLOR"
                 print("Click the car to sample its colour.")
         return True
+
+    def start_leaderboard(self, port: int) -> None:
+        board, live = lb.Leaderboard(), lb.LiveState()
+        if lb.start_server(board, live, port) is None:
+            print("Runs will still be timed and saved, without the leaderboard page.")
+        else:
+            print(f"Leaderboard page:  http://localhost:{port}/         (put this on the portrait monitor)")
+            print(f"Manage page:       http://localhost:{port}/manage   (delete, restore, rename teams)")
+        self.attach_leaderboard(board, live)
 
     def run(self):
         self.connect_serial()
@@ -1394,6 +1605,10 @@ def main():
                         help="Initial saturation tolerance for interactive picker")
     parser.add_argument("--v-tol", type=int, default=DEFAULT_V_TOL,
                         help="Initial value tolerance for interactive picker")
+    parser.add_argument("--leaderboard-port", type=int, default=lb.DEFAULT_PORT,
+                        help="Port for the leaderboard web page")
+    parser.add_argument("--no-leaderboard", action="store_true",
+                        help="Track only: no teams, timer or leaderboard page")
     args = parser.parse_args()
 
     explicit_hsv = args.hsv_lower is not None or args.hsv_upper is not None
@@ -1411,6 +1626,8 @@ def main():
         v_tol=args.v_tol,
         skip_color_pick=explicit_hsv,
     )
+    if not args.no_leaderboard:
+        tracker.start_leaderboard(args.leaderboard_port)
     tracker.run()
 
 

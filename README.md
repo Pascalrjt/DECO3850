@@ -186,8 +186,32 @@ The tracker does not simply take the largest blob of the arrow colour. Tuneables
 
 Rejected blobs are marked with a grey cross in the picture. A reflection that covers the arrow still hides the car; the tracker then holds the last rate for 0.5 s and pauses.
 
+### Leaderboard (Sensory Drift)
+
+The tracker times each team's run and serves a leaderboard page for a second monitor. Code: `Vision/leaderboard.py`.
+
+Running a team, in the tracker window:
+
+1. `N`, type the team name, `Enter`. A name already on the board is refused, so each team gets one attempt.
+2. `Space` starts the clock.
+3. The run ends when the car has stayed inside the goal ring for 1 s (`ARRIVAL_DWELL_S`), or at 5:00 (`RUN_LIMIT_S`). At time-out the car's straight-line distance to the goal at that moment is recorded; if the arrow is lost then, the last known position is used.
+4. `X` aborts a run without recording it. `U` removes the most recent result.
+
+Ranking: finishers first, fastest at the top; then the rest, closest to the goal first.
+
+Pages, printed in the terminal at start-up:
+
+- `http://localhost:8000/` is the public board. Open it in a browser, move it to the portrait monitor and make it full screen. It shows the current team, the timer, the live distance and the standings. Other devices on the same network can view it at the computer's address.
+- `http://localhost:8000/manage` is for the overseer: delete, restore and rename teams. It only opens on the computer running the tracker. Deleted teams are hidden, not erased, and can be restored.
+
+Results are saved in `Vision/leaderboard.json` (not committed). The title is `TITLE` in `leaderboard.py`. Flags: `--leaderboard-port <int>` changes the port; `--no-leaderboard` runs the tracker with no teams or timer.
+
 ### Runtime keys
 
+- `N` — new team (type its name).
+- `Space` — start the run.
+- `X` — abort the run.
+- `U` — undo the last result.
 - `Enter` — confirm the current step.
 - `Backspace` — undo the last corner.
 - `R` — redo the whole setup.
