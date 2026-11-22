@@ -20,6 +20,7 @@ import serial
 from serial.tools import list_ports
 
 import leaderboard as lb
+import sounds
 
 # ---------------------------------------------------------------------------
 # Serial protocol (must match ProximityBridge_ESPNow / Pot_Controller)
@@ -346,6 +347,7 @@ HELP_LINES = [
     ("Space", "start the run"),
     ("X", "abort the run"),
     ("U", "undo the last result"),
+    ("S", "sound on or off"),
     ("Enter", "confirm the current step"),
     ("Backspace", "undo the last corner"),
     ("R", "redo the whole setup"),
@@ -434,6 +436,8 @@ class ProximityTracker:
         self.arrived_since: float | None = None     # when the car entered the goal ring
         self.run_result: dict | None = None         # result card for the run that just ended
         self.name_buffer: str | None = None         # team name being typed; None when not typing
+        self.sound: sounds.SoundPlayer | None = None    # run sound effects
+        self.last10_started = False
         self.notice = ""                            # one-line message for the overseer
         self.notice_until = 0.0
         self.cursor = (0, 0)
@@ -966,6 +970,15 @@ class ProximityTracker:
         self.notice = text
         self.notice_until = (time.monotonic() if now is None else now) + seconds
 
+    def play(self, name: str | None) -> None:
+        """Play a run sound, or stop the current one with None."""
+        if self.sound is None:
+            return
+        if name is None:
+            self.sound.stop()
+        else:
+            self.sound.play(name)
+
     def begin_name_entry(self) -> None:
         if self.board is None:
             self.say("The leaderboard is switched off.")
@@ -995,6 +1008,8 @@ class ProximityTracker:
             self.say("Finish the setup before starting a run.", now)
         else:
             self.run_phase = "countdown"
+            self.last10_started = False
+            self.play("start")                  # three notes, then the "go" chord
             self.countdown_start = now
             self.run_elapsed = 0.0
             self.closest_mm = None
@@ -1003,6 +1018,7 @@ class ProximityTracker:
 
     def abort_run(self, now: float) -> None:
         if self.run_phase in ("running", "countdown"):
+            self.play(None)
             self.run_phase = "ready"
             self.run_elapsed = 0.0
             self.say(f"Run aborted. {self.team} can start again with Space.", now)
@@ -1025,6 +1041,7 @@ class ProximityTracker:
         entry = self.board.add(self.team, finished, self.run_elapsed, distance)
         self.run_result = dict(self.board.describe(entry["id"]), id=entry["id"])
         self.run_phase = "finished" if finished else "timeout"
+        self.play("goal" if finished else "timesup")
         if finished:
             self.say(f"{self.team} reached the goal in {lb.format_time(self.run_elapsed)}: "
                      f"{self.run_result.get('place_text', '')}.", now, 8.0)
@@ -1046,6 +1063,9 @@ class ProximityTracker:
             self.say(f"Go! Run started for {self.team}.", now, 2.0)
         if self.run_phase == "running":
             self.run_elapsed = min(now - self.run_start, lb.RUN_LIMIT_S)
+            if not self.last10_started and lb.RUN_LIMIT_S - self.run_elapsed <= sounds.LAST_SECONDS:
+                self.last10_started = True
+                self.play("last10")             # suspense groove for the final seconds
             if valid and distance_mm is not None:
                 self.closest_mm = distance_mm if self.closest_mm is None else min(self.closest_mm, distance_mm)
                 # Finish: the car has stayed inside the goal ring for a moment
@@ -1375,7 +1395,7 @@ class ProximityTracker:
                 return "[Space] start run    [N] change team    [H] help    [Q] quit"
             if self.run_phase in ("finished", "timeout"):
                 return "[N] next team    [U] undo this result    [H] help    [Q] quit"
-            return "[N] new team    [U] undo last result    [H] help    [Z] zones    [M] mask    [Q] quit"
+            return "[N] new team    [U] undo last result    [S] sound    [H] help    [Z] zones    [M] mask    [Q] quit"
         return "[H] help    [Z] zones    [M] mask    [D] new goal    [C] colour    [R] redo setup    [Q] quit"
 
     def _draw_resume_card(self, frame) -> None:
@@ -1495,6 +1515,12 @@ class ProximityTracker:
         if key == ord("u"):
             self.undo_last_result(now)
             return True
+        if key == ord("s"):
+            if self.sound is None or self.sound.command is None:
+                self.say("Sound is not available on this computer.", now)
+            else:
+                self.say("Sound on." if self.sound.toggle() else "Sound off.", now, 2.0)
+            return True
         if self.run_phase in ("running", "countdown") and key in (ord("r"), ord("c"), ord("d"), ord("g"),
                                                    *KEY_BACKSPACE):
             self.say("Not during a run. Press X to abort the run first.", now)
@@ -1531,8 +1557,9 @@ class ProximityTracker:
                 print("Click the car to sample its colour.")
         return True
 
-    def start_leaderboard(self, port: int) -> None:
+    def start_leaderboard(self, port: int, sound: bool = True) -> None:
         board, live = lb.Leaderboard(), lb.LiveState()
+        self.sound = sounds.SoundPlayer(enabled=sound)
         if lb.start_server(board, live, port) is None:
             print("Runs will still be timed and saved, without the leaderboard page.")
         else:
@@ -1607,6 +1634,7 @@ class ProximityTracker:
                 self.ser.close()
             if self.cap:
                 self.cap.release()
+            self.play(None)
             cv2.destroyAllWindows()
 
 
@@ -1630,6 +1658,8 @@ def main():
                         help="Initial value tolerance for interactive picker")
     parser.add_argument("--leaderboard-port", type=int, default=lb.DEFAULT_PORT,
                         help="Port for the leaderboard web page")
+    parser.add_argument("--no-sound", action="store_true",
+                        help="Start with the run sounds switched off ([S] toggles them)")
     parser.add_argument("--no-leaderboard", action="store_true",
                         help="Track only: no teams, timer or leaderboard page")
     args = parser.parse_args()
@@ -1650,7 +1680,7 @@ def main():
         skip_color_pick=explicit_hsv,
     )
     if not args.no_leaderboard:
-        tracker.start_leaderboard(args.leaderboard_port)
+        tracker.start_leaderboard(args.leaderboard_port, sound=not args.no_sound)
     tracker.run()
 
 

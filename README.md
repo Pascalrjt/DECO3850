@@ -199,6 +199,8 @@ Running a team, in the tracker window:
 
 Ranking: finishers first, fastest at the top; then the rest, closest to the goal first.
 
+Sounds play on the tracker's computer (`Vision/sounds.py`, generated tones, no audio files): three notes and a chord for the countdown, a groove for the last 10 seconds, a fanfare at the goal, and a gong when time runs out. `S` switches them on or off, and `--no-sound` starts with them off. Turn the computer's volume up before a session.
+
 Pages, printed in the terminal at start-up:
 
 - `http://localhost:8000/` is the public board. Open it in a browser, move it to the portrait monitor and make it full screen. It shows the current team, the timer, the live distance and the standings. Other devices on the same network can view it at the computer's address.
@@ -212,6 +214,7 @@ Results are saved in `Vision/leaderboard.json` (not committed). The title is `TI
 - `Space` — start the run.
 - `X` — abort the run.
 - `U` — undo the last result.
+- `S` — run sounds on or off.
 - `Enter` — confirm the current step.
 - `Backspace` — undo the last corner.
 - `R` — redo the whole setup.
