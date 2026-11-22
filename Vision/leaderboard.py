@@ -16,6 +16,7 @@ from pathlib import Path
 
 TITLE = "SENSORY DRIFT"
 RUN_LIMIT_S = 300.0               # a run ends after five minutes
+COUNTDOWN_S = 3.0                 # 3, 2, 1 before the clock starts
 ARRIVAL_DWELL_S = 1.0             # the car must stay in the goal ring this long to finish
 MAX_TEAM_NAME = 20
 DEFAULT_PORT = 8000
@@ -182,7 +183,7 @@ class LiveState:
     def __init__(self):
         self.lock = threading.Lock()
         self.data = {"phase": "idle", "team": None, "elapsed_s": 0.0, "remaining_s": RUN_LIMIT_S,
-                     "distance_mm": None, "closest_mm": None, "result": None}
+                     "distance_mm": None, "closest_mm": None, "result": None, "countdown": 0}
 
     def set(self, **values) -> None:
         with self.lock:
@@ -234,6 +235,8 @@ PUBLIC_PAGE = """<!doctype html>
   .dist small { display: block; font-size: calc(var(--u) * 2.6); color: var(--muted); }
   .dist b { font: 700 calc(var(--u) * 5.2)/1.2 ui-monospace, Menlo, monospace; color: var(--green); }
   .dist span { font-size: calc(var(--u) * 2.6); color: var(--muted); }
+  .count { font: 800 calc(var(--u) * 30)/1 ui-monospace, Menlo, monospace; color: var(--gold); text-align: center;
+           margin-top: calc(var(--u) * 2); }
   .place { font-size: calc(var(--u) * 4.2); font-weight: 700; color: #fff; }
   .detail { font-size: calc(var(--u) * 2.8); color: #a9d9b8; margin-top: calc(var(--u) * 1); }
   .out .detail { color: #e0c49a; }
@@ -278,6 +281,9 @@ function render(st) {
     card.innerHTML = `<div class="label" style="color:${done ? 'var(--green)' : '#e0a95a'}">${done ? 'GOAL REACHED' : "TIME'S UP"}</div>
       <div class="team">${esc(live.team)}</div><div class="time">${esc(done ? r.result : r.result.replace(' away', ''))}</div>
       <div class="place">${esc(r.place_text || '')}</div><div class="detail">${esc(r.detail || '')}</div>`;
+  } else if (live.phase === 'countdown') {
+    card.innerHTML = `<div class="label">STARTING</div><div class="team">${esc(live.team)}</div>
+      <div class="count">${live.countdown}</div>`;
   } else if (live.phase === 'ready') {
     card.innerHTML = `<div class="label">UP NEXT</div><div class="team">${esc(live.team)}</div>
       <div class="clock"><div class="time">0:00</div><div class="left"><small>time limit</small><b>${mmss(st.limit_s)}</b></div></div>

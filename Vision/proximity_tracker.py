@@ -422,12 +422,13 @@ class ProximityTracker:
         self.ignored_px: list[tuple[int, int]] = []         # blobs rejected this frame, for the overlay
         self.ignored_total = 0
 
-        # Leaderboard run: idle -> ready (team named) -> running -> finished / timeout
+        # Leaderboard run: idle -> ready (team named) -> countdown -> running -> finished / timeout
         self.board: lb.Leaderboard | None = None
         self.live: lb.LiveState | None = None
         self.run_phase = "idle"
         self.team: str | None = None
         self.run_start = 0.0
+        self.countdown_start = 0.0
         self.run_elapsed = 0.0
         self.closest_mm: float | None = None
         self.arrived_since: float | None = None     # when the car entered the goal ring
@@ -968,7 +969,7 @@ class ProximityTracker:
     def begin_name_entry(self) -> None:
         if self.board is None:
             self.say("The leaderboard is switched off.")
-        elif self.run_phase == "running":
+        elif self.run_phase in ("running", "countdown"):
             self.say("A run is in progress. Press X to abort it first.")
         else:
             self.name_buffer = ""
@@ -993,21 +994,21 @@ class ProximityTracker:
         elif self.state != "TRACKING":
             self.say("Finish the setup before starting a run.", now)
         else:
-            self.run_phase = "running"
-            self.run_start = now
+            self.run_phase = "countdown"
+            self.countdown_start = now
             self.run_elapsed = 0.0
             self.closest_mm = None
             self.arrived_since = None
-            self.say(f"Run started for {self.team}.", now)
+            self.say(f"Countdown for {self.team}. Press X to cancel.", now, lb.COUNTDOWN_S)
 
     def abort_run(self, now: float) -> None:
-        if self.run_phase == "running":
+        if self.run_phase in ("running", "countdown"):
             self.run_phase = "ready"
             self.run_elapsed = 0.0
             self.say(f"Run aborted. {self.team} can start again with Space.", now)
 
     def undo_last_result(self, now: float) -> None:
-        if self.board is None or self.run_phase == "running":
+        if self.board is None or self.run_phase in ("running", "countdown"):
             return
         entry = self.board.undo_last()
         if entry is None:
@@ -1031,8 +1032,18 @@ class ProximityTracker:
             self.say(f"Time's up for {self.team}: {self.run_result.get('result', '')}, "
                      f"{self.run_result.get('place_text', '')}.", now, 8.0)
 
+    def countdown_number(self, now: float) -> int:
+        """3, 2 or 1 during the countdown; 0 otherwise."""
+        if self.run_phase != "countdown":
+            return 0
+        return max(1, int(np.ceil(lb.COUNTDOWN_S - (now - self.countdown_start))))
+
     def update_run(self, distance_mm, valid: bool, now: float) -> None:
-        """Advance the run clock and decide whether the run has ended."""
+        """Advance the countdown and the run clock, and decide whether the run has ended."""
+        if self.run_phase == "countdown" and now - self.countdown_start >= lb.COUNTDOWN_S:
+            self.run_phase = "running"
+            self.run_start = now
+            self.say(f"Go! Run started for {self.team}.", now, 2.0)
         if self.run_phase == "running":
             self.run_elapsed = min(now - self.run_start, lb.RUN_LIMIT_S)
             if valid and distance_mm is not None:
@@ -1051,7 +1062,8 @@ class ProximityTracker:
             self.live.set(phase=self.run_phase, team=self.team, elapsed_s=self.run_elapsed,
                           remaining_s=max(0.0, lb.RUN_LIMIT_S - self.run_elapsed),
                           distance_mm=distance_mm if valid else self.last_distance_mm,
-                          closest_mm=self.closest_mm, result=self.run_result)
+                          closest_mm=self.closest_mm, result=self.run_result,
+                          countdown=self.countdown_number(now))
 
     # ------------------------------------------------------------------
     # Coordinate transform + distance
@@ -1179,6 +1191,12 @@ class ProximityTracker:
             self._draw_mask_inset(frame, mask)
         if self.state == "RESUME":
             self._draw_resume_card(frame)
+        if self.run_phase == "countdown":
+            digit = str(self.countdown_number(now))
+            (tw, th), _ = cv2.getTextSize(digit, cv2.FONT_HERSHEY_SIMPLEX, 6.0, 12)
+            origin = ((width - tw) // 2, (height + th) // 2)
+            cv2.putText(frame, digit, origin, cv2.FONT_HERSHEY_SIMPLEX, 6.0, (20, 20, 20), 22, cv2.LINE_AA)
+            cv2.putText(frame, digit, origin, cv2.FONT_HERSHEY_SIMPLEX, 6.0, GOAL_YELLOW, 12, cv2.LINE_AA)
 
         # --- bars above and below the picture, so nothing covers the maze ---
         canvas = cv2.copyMakeBorder(frame, TOP_BAR_H, FOOTER_H, 0, 0,
@@ -1275,6 +1293,9 @@ class ProximityTracker:
                 put(frame, lb.format_time(self.run_elapsed), (run_x, 34), WHITE, 0.95, 2)
                 put(frame, f"{self.team}  ({lb.format_time(lb.RUN_LIMIT_S - self.run_elapsed + 0.999)} left)",
                     (run_x, 53), GOAL_YELLOW, 0.42)
+            elif self.run_phase == "countdown":
+                put(frame, f"Starting in {self.countdown_number(now)}", (run_x, 30), WHITE, 0.75, 2)
+                put(frame, self.team or "", (run_x, 53), GOAL_YELLOW, 0.42)
             elif self.run_phase == "ready":
                 put(frame, self.team or "", (run_x, 28), GOAL_YELLOW, 0.6)
                 put(frame, "ready: Space starts the clock", (run_x, 51), GREY, 0.42)
@@ -1346,6 +1367,8 @@ class ProximityTracker:
         if self.name_buffer is not None:
             return "Type the team name    [Enter] save    [Esc] cancel"
         if self.board is not None:
+            if self.run_phase == "countdown":
+                return "[X] cancel the start    [H] help"
             if self.run_phase == "running":
                 return "[X] abort run    [H] help    [Z] zones    [M] mask"
             if self.run_phase == "ready":
@@ -1472,7 +1495,7 @@ class ProximityTracker:
         if key == ord("u"):
             self.undo_last_result(now)
             return True
-        if self.run_phase == "running" and key in (ord("r"), ord("c"), ord("d"), ord("g"),
+        if self.run_phase in ("running", "countdown") and key in (ord("r"), ord("c"), ord("d"), ord("g"),
                                                    *KEY_BACKSPACE):
             self.say("Not during a run. Press X to abort the run first.", now)
             return True

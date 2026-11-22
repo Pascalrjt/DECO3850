@@ -193,7 +193,7 @@ The tracker times each team's run and serves a leaderboard page for a second mon
 Running a team, in the tracker window:
 
 1. `N`, type the team name, `Enter`. A name already on the board is refused, so each team gets one attempt.
-2. `Space` starts the clock.
+2. `Space` starts a 3 second countdown (`COUNTDOWN_S`), shown in the tracker and on the board. The clock starts when it reaches zero. `X` cancels it.
 3. The run ends when the car has stayed inside the goal ring for 1 s (`ARRIVAL_DWELL_S`), or at 5:00 (`RUN_LIMIT_S`). At time-out the car's straight-line distance to the goal at that moment is recorded; if the arrow is lost then, the last known position is used.
 4. `X` aborts a run without recording it. `U` removes the most recent result.
 
