@@ -119,7 +119,7 @@
       <li>The joystick is the wall-bump sensor. Every 40 ms the car sends its state to the MotorESP, which runs the wall haptics.</li>
       <li>The joystick pin labelled <b>+5V</b> goes to <b>3.3 V</b>, so its outputs stay within the ADC range.</li>
       <li>Leave the joystick centred while powering on (start-up calibration).</li>
-      <li><b>GPIO 12</b> is a boot-strapping pin. If the car fails to boot, unplug the left driver's IN3 wire during power-on.</li>
+      <li>The left driver's IN3 is on <b>IO16</b>. It was on IO12, a boot-strapping pin, which stopped the car starting and taking uploads with the driver attached. On the board, io16 is the third socket of the lower digital block, beside io14 and io27.</li>
       <li><b>Stepper power:</b> both drivers take + from the ESP32's <b>5V</b> pin and − from GND, so the car has no separate motor supply.</li>
       <li class="assume">Assumed: ULN2003-style driver boards (IN1 to IN4). Check your driver's power markings.</li>
     </ul>
@@ -142,7 +142,7 @@
       <tr><th>Row</th><th>Left half (ESP32 side)</th><th>Right half</th></tr>
       <tr><td>16</td><td>ESP32 IO27, left driver IN1</td><td>Spare</td></tr>
       <tr><td>15</td><td>ESP32 IO14, left driver IN2</td><td>Spare</td></tr>
-      <tr><td>14</td><td>ESP32 IO12, left driver IN3</td><td>Spare</td></tr>
+      <tr><td>14</td><td>ESP32 IO16, left driver IN3</td><td>Spare</td></tr>
       <tr><td>13</td><td>ESP32 IO13, left driver IN4</td><td>Spare</td></tr>
       <tr><td>12</td><td>5 V: ESP32 5V, jumper to the right half</td><td>5 V: jumper from the left half, left driver +, right driver +</td></tr>
       <tr><td>10</td><td>Ground: ESP32 GND, joystick GND, jumper to the right half</td><td>Ground: jumper from the left half, left driver −, right driver −</td></tr>
@@ -166,7 +166,7 @@
   </section>
   <section>
     <h2>4. ButtonESP</h2>
-    <p class="sub">MAC C0:CD:D6:81:FF:80 · sketch <code>buttonTrigger</code> · 4 push buttons</p>
+    <p class="sub">MAC C0:CD:D6:81:FF:80 · sketch <code>buttonTrigger</code> · Keyestudio ESP32 PLUS, one ElectroCookie Mini PCB, 4 push buttons</p>
     <div class="scroll" id="buttons"></div>
     <ul>
       <li><b>Signal wire colours:</b> button 1 yellow, button 2 blue, button 3 teal, button 4 white. The ground links are black.</li>
@@ -174,6 +174,27 @@
       <li>The sketch now uses ESP-NOW channel 6. Flash it together with the MotorESP, since the two can only talk once both are on channel 6.</li>
       <li><b>GPIO 12</b> is a boot-strapping pin that must be low at power-on. A button to ground can only pull it low, so button 3 is safe whether pressed or released. Never add an external pull-up resistor to this pin.</li>
     </ul>
+
+    <h3>Breadboard layout: one ElectroCookie Mini PCB (hub enclosure)</h3>
+    <p class="sub">The same circuit on the Mini PCB that clips under the lid of the hub enclosure, above the ESP32. The board joins the four button cables to the ESP32 with five jumper wires, and one button cable leaves through each wall. The view is from above with the lid closed: USB end on the left, back wall at the top.</p>
+    <div class="scroll" id="buttons-bb"></div>
+    <ul>
+      <li>Rows are counted from the USB end: row 1 is nearest the USB end, row 17 nearest the far wall. Each row has two separate 5-hole strips: holes a to e on the back-wall side, f to j on the front-wall side.</li>
+      <li><b>Each button's signal has its own strip</b> on the back-wall side, in the row nearest that button's wall. The ESP32 jumper goes in hole a and the button cable's signal wire in hole e.</li>
+      <li><b>Ground is one strip:</b> row 9, front-wall side. The ESP32 GND jumper goes in hole j and the four button grounds in holes f to i.</li>
+      <li>The button cables are drawn passing over other strips on their way to the walls. They connect only at the holes marked with a dot.</li>
+      <li><b>The board hangs wire side down,</b> so when you turn the lid over to work on it you see this drawing mirrored. Go by the row number counted from the USB end and by the back-wall or front-wall side, which hold whichever way up it is.</li>
+      <li>Any free hole in the same strip is electrically the same, and the four corner holes stay empty for the cradles.</li>
+      <li>Pins are named as printed on the Keyestudio ESP32 PLUS: IO27 is GPIO 27.</li>
+    </ul>
+    <table>
+      <tr><th>Row</th><th>Side</th><th>Net</th><th>What is soldered there</th></tr>
+      <tr><td>3</td><td>Back wall</td><td>Button 4 signal</td><td>ESP32 IO13 (hole a), button 4 signal wire (hole e), leaving through the USB-end wall</td></tr>
+      <tr><td>7</td><td>Back wall</td><td>Button 1 signal</td><td>ESP32 IO27 (hole a), button 1 signal wire (hole e), leaving through the front wall</td></tr>
+      <tr><td>9</td><td>Front wall</td><td>Ground</td><td>Button 2 ground (f), button 3 ground (g), button 4 ground (h), button 1 ground (i), ESP32 GND (j)</td></tr>
+      <tr><td>11</td><td>Back wall</td><td>Button 3 signal</td><td>ESP32 IO12 (hole a), button 3 signal wire (hole e), leaving through the back wall</td></tr>
+      <tr><td>15</td><td>Back wall</td><td>Button 2 signal</td><td>ESP32 IO14 (hole a), button 2 signal wire (hole e), leaving through the far wall</td></tr>
+    </table>
   </section>
 
   <section>
@@ -509,7 +530,7 @@ function diagram(W, H) {
   d.box(440, 60, 160, 540, 'RC Car ESP32', ESP);
   [[120, '3V3'], [160, 'GPIO 35'], [200, 'GPIO 34'], [240, 'GND']]
     .forEach(([y, l]) => d.term(440, y, l, 'L'));
-  [[110, 'GPIO 27'], [140, 'GPIO 14'], [170, 'GPIO 12'], [200, 'GPIO 13'],
+  [[110, 'GPIO 27'], [140, 'GPIO 14'], [170, 'GPIO 16'], [200, 'GPIO 13'],
    [370, 'GPIO 26'], [400, 'GPIO 25'], [430, 'GPIO 33'], [460, 'GPIO 32'], [530, '5V'], [560, 'GND']]
     .forEach(([y, l]) => d.term(600, y, l, 'R'));
 
@@ -566,7 +587,7 @@ function diagram(W, H) {
     [1, '3V3', C.v3], [2, 'IO35', C.s[0]], [3, 'IO34', C.s[1]],
     [4, 'IO26', C.s[0]], [5, 'IO25', C.s[1]], [6, 'IO33', C.s[2]], [7, 'IO32', C.s[3]],
     [9, 'GND', C.gnd], [11, '5V', C.v5],
-    [12, 'IO13', C.s[3]], [13, 'IO12', C.s[2]], [14, 'IO14', C.s[1]], [15, 'IO27', C.s[0]]];
+    [12, 'IO13', C.s[3]], [13, 'IO16', C.s[2]], [14, 'IO14', C.s[1]], [15, 'IO27', C.s[0]]];
 
   // strip tints: row, half (0 = a-e ESP32 side, 1 = f-j far side)
   const tint = { '9:1': C.gnd, '11:1': C.v5 };
@@ -680,6 +701,79 @@ function diagram(W, H) {
   d.wire(C.gnd, [[460, 370], [560, 370], [560, 125], [640, 125]]);
   [195, 265, 335].forEach(y => { d.wire(C.gnd, [[560, y], [640, y]]); d.dot(560, y, C.gnd); });
   d.render('buttons');
+})();
+
+/* ---------------- 4b. ButtonESP breadboard layout (hub enclosure, Mini PCB under the lid) ---------------- */
+(function () {
+  const d = diagram(1060, 790);
+  const P = 22, BX = 360, BW = 432, BTOP = 300, BH = 318;
+  const COLS = 'abcdefghij';
+  const rx = r => BX + 40 + r * P;                        // r = 0..16, printed as row r + 1
+  const cy = c => { const i = COLS.indexOf(c); return BTOP + 40 + i * P + (i < 5 ? 0 : 40); };
+  const H = (r, c) => [rx(r), cy(c)];
+  const PART = '#f1f3f5';
+
+  // signal strips (back-wall side): row -> button index; ground strip: row 9 front-wall side
+  const SIG = { 2: 3, 6: 0, 10: 2, 14: 1 };
+  d.under(`<rect x="${BX}" y="${BTOP}" width="${BW}" height="${BH}" rx="10" fill="#e3f1e6" stroke="#2b6a3c" stroke-width="2"/>`);
+  for (let r = 0; r < 17; r++) {
+    [0, 1].forEach(h => {
+      const y0 = cy(h ? 'f' : 'a') - 8, y1 = cy(h ? 'j' : 'e') + 8;
+      const col = h ? (r === 8 ? C.gnd : null) : (r in SIG ? C.s[SIG[r]] : null);
+      d.under(`<rect x="${rx(r) - 7}" y="${y0}" width="14" height="${y1 - y0}" rx="7" fill="${col === C.mot ? '#adb5bd' : (col || '#c9dccd')}" fill-opacity="${col ? 0.38 : 1}"/>`);
+    });
+    for (const c of COLS)
+      d.under(`<circle cx="${rx(r)}" cy="${cy(c)}" r="3" fill="#fff" stroke="#74857a" stroke-width="1"/>`);
+    d.text(rx(r), BTOP + BH - 8, r + 1, { size: 9, fill: '#57606a' });
+  }
+  for (const c of COLS) d.text(BX + BW - 14, cy(c) + 3, c, { size: 9, fill: '#57606a' });
+  d.text(BX + 6, BTOP + 16, 'Mini PCB (under the lid)', { size: 11, weight: 700, anchor: 'start' });
+
+  const run = (col, pts, ends) => { d.wire(col, pts); (ends || [pts[0], pts[pts.length - 1]]).forEach(e => d.dot(e[0], e[1], col)); };
+
+  // ESP32 (drawn by label): five jumpers to the Mini PCB
+  d.box(40, 70, 160, 200, 'Keyestudio ESP32 PLUS', '#e7f5ff');
+  [[100, 'IO14', 14, 1], [130, 'IO12', 10, 2], [160, 'IO27', 6, 0], [190, 'IO13', 2, 3]].forEach(([y, l, r, b]) => {
+    d.term(200, y, l, 'R');
+    run(C.s[b], [[200, y], [rx(r), y], H(r, 'a')], [H(r, 'a')]);
+  });
+  d.term(200, 240, 'GND', 'R');
+  run(C.gnd, [[200, 240], [300, 240], [300, 660], [rx(8), 660], H(8, 'j')], [H(8, 'j')]);
+
+  // buttons, one beyond each wall
+  const g = 11;   // half a row: wires leave between two rows of holes
+  // button 4: USB-end wall (left)
+  d.box(40, 420, 160, 80, '', PART);
+  d.term(200, 450, 'signal', 'R'); d.term(200, 472, 'ground', 'R');
+  d.text(92, 441, 'Button 4', { weight: 700, size: 12 });
+  d.text(60, 416, 'USB-end wall', { size: 11, fill: '#57606a', anchor: 'start' });
+  run(C.s[3], [H(2, 'e'), [rx(2) - g, 450], [200, 450]], [H(2, 'e')]);
+  run(C.gnd, [H(8, 'h'), [rx(8) - g, cy('h') - g], [rx(8) - g, 472], [200, 472]], [H(8, 'h')]);
+  // button 2: far wall (right)
+  d.box(860, 420, 160, 80, '', PART);
+  d.term(860, 450, 'signal', 'L'); d.term(860, 472, 'ground', 'L');
+  d.text(968, 441, 'Button 2', { weight: 700, size: 12 });
+  d.text(1000, 416, 'far wall', { size: 11, fill: '#57606a', anchor: 'end' });
+  run(C.s[1], [H(14, 'e'), [rx(14) + g, 450], [860, 450]], [H(14, 'e')]);
+  run(C.gnd, [H(8, 'f'), [rx(8) + g, 472], [860, 472]], [H(8, 'f')]);
+  // button 3: back wall (top)
+  d.box(rx(8) - 50, 12, 200, 46, '', PART);
+  d.term(rx(8) + g, 58, '', 'T'); d.term(rx(10) + g, 58, '', 'T');
+  d.text(rx(8) + g, 48, 'ground', { size: 10 }); d.text(rx(10) + g, 48, 'signal', { size: 10 });
+  d.text(rx(8) + 82, 31, 'Button 3', { weight: 700, size: 12 });
+  d.text(rx(8) + 160, 40, 'back wall', { size: 11, fill: '#57606a', anchor: 'start' });
+  run(C.s[2], [H(10, 'e'), [rx(10) + g, cy('e') - g], [rx(10) + g, 58]], [H(10, 'e')]);
+  run(C.gnd, [H(8, 'g'), [rx(8) + g, cy('g') - g], [rx(8) + g, 58]], [H(8, 'g')]);
+  // button 1: front wall (bottom)
+  d.box(rx(6) - 50, 710, 200, 60, '', PART);
+  d.term(rx(6) + g, 710, '', 'T'); d.term(rx(8) + g, 710, '', 'T');
+  d.text(rx(6) + g, 730, 'signal', { size: 10 }); d.text(rx(8) + g, 730, 'ground', { size: 10 });
+  d.text(rx(6) + 50, 758, 'Button 1', { weight: 700, size: 12 });
+  d.text(rx(6) + 160, 745, 'front wall', { size: 11, fill: '#57606a', anchor: 'start' });
+  run(C.s[0], [H(6, 'e'), [rx(6) + g, cy('e') + g], [rx(6) + g, 710]], [H(6, 'e')]);
+  run(C.gnd, [H(8, 'i'), [rx(8) + g, cy('i') + g], [rx(8) + g, 710]], [H(8, 'i')]);
+
+  d.render('buttons-bb');
 })();
 
 /* ---------------- 5. MotorESP ---------------- */

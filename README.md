@@ -17,7 +17,7 @@ Board role:
 ### Left Stepper Motor (Motor 1)
 - `GPIO 27` -> `M1_IN1`
 - `GPIO 14` -> `M1_IN2`
-- `GPIO 12` -> `M1_IN3`
+- `GPIO 16` -> `M1_IN3` (moved from `GPIO 12`, a boot-strapping pin that stopped the car booting and taking uploads with the driver attached)
 - `GPIO 13` -> `M1_IN4`
 
 ### Right Stepper Motor (Motor 2)
@@ -79,7 +79,7 @@ One vibration motor for proximity feedback, on one DFRobot dual driver (`M1` cha
 Notes:
 - `GPIO 34` and `GPIO 35` are input-only ADC pins, which is appropriate for the steering and throttle potentiometers.
 - The controller sketch calibrates steering center at startup, so leave the steering pot centered while powering on.
-- The proximity haptic motor pulses according to `ProximityPacket` messages from the bridge ESP32. Distance is quantised into 200 mm buckets and each bucket fires a fixed 100 ms pulse at full PWM (255); only the gap between pulses changes. Faster pulses mean the car is closer to the destination — see the table under [Proximity Tracking (PC-side)](#proximity-tracking-pc-side).
+- The proximity haptic motor pulses according to `ProximityPacket` messages from the bridge ESP32. Distance is quantised into one bucket per maze cell (about 115 mm) and each bucket fires a fixed 100 ms pulse at full PWM (255); only the gap between pulses changes. Faster pulses mean the car is closer to the destination — see the table under [Proximity Tracking (PC-side)](#proximity-tracking-pc-side).
 - The haptic GPIOs (25/26) are general-purpose pins with no ESP32 boot-strapping role, so a driver input cannot block start-up. Avoid `GPIO 12` for haptics — it selects flash voltage at boot, and a driver holding it high can stop the board from booting.
 
 ## Bridge ESP32 Pinout
@@ -111,8 +111,9 @@ This MAC is set as `BRIDGE_MAC` in the controller sketch (`Pot_Controller_Haptic
 
 - Script: `Vision/proximity_tracker.py`
 - Dependencies: `Vision/requirements.txt` (`pip install -r Vision/requirements.txt`)
-- An overhead webcam views the 1.2 m × 1.2 m maze. The overseer calibrates four maze corners (click TL, TR, BR, BL) and clicks to set the destination.
-- A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean distance to the destination is bucketed into 200 mm steps to drive the haptic motor.
+- An overhead webcam views the 800 mm × 600 mm maze (7 cells across, 5 down). The overseer calibrates four maze corners (click TL, TR, BR, BL, with the 800 mm side as the top edge).
+- The goal is fixed in the script (`DEFAULT_DESTINATION_MM`: the cell in column 5, row 2, at 514 mm across and 180 mm down from the top-left corner) and is placed automatically after calibration. The overlay draws it as a yellow dot with its coordinates and a ring showing the arrival zone. It also draws a ring at each pulse-rate boundary (115, 230, 345, 460 and 575 mm from the goal), labelled with the rate felt inside it; the ring bounding the car's current zone is highlighted.
+- A coloured arrow on the car roof is detected via HSV thresholding. The centroid is mapped through a homography to maze-millimetre coordinates, and the Euclidean (straight-line) distance to the goal is bucketed into one step per maze cell to drive the haptic motor.
 - Motor parameters are sent as framed binary packets over USB serial to the bridge ESP32, which rebroadcasts them via ESP-NOW.
 
 ### Distance → haptic mapping
@@ -122,28 +123,35 @@ All pulses fire at PWM `255` with a `100 ms` pulse width; only `pulse_off` (the 
 | Distance (mm) | `pulse_on` | `pulse_off` | Rate |
 | --- | --- | --- | --- |
 | < 50 (arrived) | 500 ms | 0 ms | solid on |
-| 50–200 | 100 ms | 100 ms | ~5.0 Hz |
-| 200–400 | 100 ms | 220 ms | ~3.1 Hz |
-| 400–600 | 100 ms | 400 ms | ~2.0 Hz |
-| 600–800 | 100 ms | 700 ms | ~1.25 Hz |
-| 800–1000 | 100 ms | 1150 ms | ~0.8 Hz |
-| 1000–1200 | 100 ms | 1900 ms | ~0.5 Hz |
+| 50–115 | 100 ms | 100 ms | ~5.0 Hz |
+| 115–230 | 100 ms | 220 ms | ~3.1 Hz |
+| 230–345 | 100 ms | 400 ms | ~2.0 Hz |
+| 345–460 | 100 ms | 700 ms | ~1.25 Hz |
+| 460–575 | 100 ms | 1150 ms | ~0.8 Hz |
+| > 575 | 100 ms | 1900 ms | ~0.5 Hz |
+
+From the fixed goal, the start cell is about 580 mm away and the farthest corner about 660 mm, so the whole maze spans all six rates.
 
 ### Running the tracker
 
-Default invocation (uses the macOS default port `/dev/cu.usbserial-10`):
+Default invocation, with no flags needed:
 
 ```
 python3 Vision/proximity_tracker.py
 ```
 
-If the serial port cannot be opened the script prints `Serial connection failed` and continues in vision-only mode — calibration and tracking still work but no packets reach the bridge, so the proximity haptic motor will stay silent.
+At start-up the tracker does two things for you:
+
+- **Finds the Bridge.** It listens on each USB serial port for the Bridge's status line (`Forwarded: … Dropped: …`) and uses the port that answers, so the port name no longer matters. Opening a port resets the ESP32 on it, so any other board plugged into the computer restarts once.
+- **Lets you pick the camera.** With more than one camera, a `Select Camera` window shows each picture: `N` next, `P` previous, `Enter` to use it. The choice is saved in `Vision/.tracker_settings.json` and offered first next time.
+
+If no Bridge is found, or the given port cannot be opened, the script says so and continues in vision-only mode — calibration and tracking still work but no packets reach the bridge, so the proximity haptic motor will stay silent.
 
 ### CLI flags
 
-- `--port <path>` — serial port for the bridge ESP32. Default `/dev/cu.usbserial-10` (macOS). Use `ls /dev/cu.usbserial-*` to confirm the device name, or `/dev/ttyUSB0` on Linux.
+- `--port <path>` — serial port for the bridge ESP32. Skips the automatic search. Default: found automatically.
 - `--baud <int>` — serial baud rate. Default `115200` (must match the bridge sketch).
-- `--camera <int>` — camera device index passed to OpenCV. Default `0`.
+- `--camera <int>` — camera device index passed to OpenCV. Skips the on-screen picker. Default: picked on screen.
 - `--hsv-lower H S V` — HSV lower bound for arrow detection. Passing this (or `--hsv-upper`) skips the interactive colour picker.
 - `--hsv-upper H S V` — HSV upper bound for arrow detection.
 - `--h-tol <int>` — initial hue tolerance for the interactive picker. Default `10`.
@@ -154,7 +162,9 @@ If the serial port cannot be opened the script prints `Serial connection failed`
 
 - `R` — reset calibration (re-click the four corners).
 - `C` — re-pick the car colour.
-- `D` — set a new destination.
+- `D` — click a different goal for this run.
+- `G` — return to the fixed goal.
+- `Z` — show or hide the zone rings.
 - `Q` — quit.
 
 ## Legacy Joystick Test Pinout
