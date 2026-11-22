@@ -74,6 +74,21 @@ PROX_DISTANCE_BUCKETS = (
 )
 
 # ---------------------------------------------------------------------------
+# Tracking robustness: reject glare and look-alike objects
+# ---------------------------------------------------------------------------
+# The car tops out near 55 mm/s (72 mm wheels on 28BYJ-48 steppers at 1000 half-steps/s),
+# so a detection that needs a much faster move is not the car.
+JUMP_SPEED_LIMIT_MM_S = 300.0     # fastest move accepted between detections
+JUMP_MARGIN_MM = 40.0             # allowance for detection noise on top of that
+RELOCATE_CONFIRM_S = 0.5          # a new, far-away position must hold this long to be accepted
+RELOCATE_RADIUS_MM = 40.0         # ...and stay within this radius while it holds
+ARROW_MIN_AREA_MM2 = 100.0        # blobs smaller than about 10 x 10 mm are noise
+ARROW_MAX_AREA_MM2 = 8000.0       # blobs larger than about 90 x 90 mm are glare or the floor
+MAZE_MASK_MARGIN_PX = 20          # look this far outside the clicked corners, no further
+POSITION_SMOOTHING = 0.5          # 0 = frozen, 1 = no smoothing
+ZONE_HYSTERESIS_MM = 12.0         # the car must pass a ring by this much before the rate changes
+
+# ---------------------------------------------------------------------------
 # Arrow detection defaults (bright saturated colour on neutral roof)
 # ---------------------------------------------------------------------------
 DEFAULT_HSV_LOWER = (5, 150, 100)
@@ -247,6 +262,31 @@ def build_frame(seq: int, strength: int, pulse_on: int,
     return FRAME_MAGIC + payload + bytes([xor_checksum(payload)])
 
 
+ZONE_BOUNDS_MM = (ARRIVAL_THRESHOLD_MM,) + tuple(b for b, _ in PROX_DISTANCE_BUCKETS[:-1])
+
+
+def zone_index(distance_mm: float, current: int | None = None) -> int:
+    """Zone number for a distance: 0 = arrived, then one per ring outward.
+
+    With `current` given, a move to the neighbouring zone only counts once the car
+    is ZONE_HYSTERESIS_MM past the ring, so the pulse rate does not flicker on a boundary.
+    """
+    zone = sum(1 for bound in ZONE_BOUNDS_MM if distance_mm >= bound)
+    if current is not None and abs(zone - current) == 1:
+        boundary = ZONE_BOUNDS_MM[min(zone, current)]
+        if abs(distance_mm - boundary) < ZONE_HYSTERESIS_MM:
+            return current
+    return zone
+
+
+def zone_motor_params(zone: int):
+    """Motor parameters for a zone number."""
+    if zone <= 0:
+        return PROX_STRENGTH, PROX_ARRIVAL_PULSE_ON_MS, 0, FLAG_VALID
+    index = min(zone - 1, len(PROX_DISTANCE_BUCKETS) - 1)
+    return PROX_STRENGTH, PROX_PULSE_ON_MS, PROX_DISTANCE_BUCKETS[index][1], FLAG_VALID
+
+
 def pulse_rate_label(distance_mm: float) -> str:
     """Human-readable cadence for the overlay."""
     _, on, off, _ = distance_to_motor_params(distance_mm, True)
@@ -366,6 +406,13 @@ class ProximityTracker:
         self.last_distance_mm: float | None = None
         self.last_params = (0, 0, 0, 0)         # last valid motor parameters sent
         self.pulse_anchor = time.monotonic()    # start of the on-screen pulse cycle
+        self.maze_mask: np.ndarray | None = None  # detections outside the maze are ignored
+        self.track_mm: tuple[float, float] | None = None   # smoothed car position
+        self.zone: int | None = None            # current pulse zone (with hysteresis)
+        self.pending_mm: tuple[float, float] | None = None  # far-away candidate being confirmed
+        self.pending_since = 0.0
+        self.ignored_px: list[tuple[int, int]] = []         # blobs rejected this frame, for the overlay
+        self.ignored_total = 0
         self.cursor = (0, 0)
         self.drag_index: int | None = None      # corner being dragged in the grid check
         self.saved_setup: dict | None = None    # setup offered for reuse at start-up
@@ -481,6 +528,7 @@ class ProximityTracker:
         self.sampled_hsv = None
         self.saved_setup = None
         self.drag_index = None
+        self.reset_track()
         self.state = "CALIBRATING"
         print("Setup restarted. Click the four corner posts.")
 
@@ -525,6 +573,7 @@ class ProximityTracker:
         elif self.state == "PICK_COLOR":
             self.sample_color_at(self._last_frame, x, y)
             self._sync_trackbars()
+            self.reset_track()
             if self.destination_mm is not None:
                 self.state = "TRACKING"
                 self.save_setup()
@@ -586,8 +635,34 @@ class ProximityTracker:
             [0, MAZE_HEIGHT_MM],
         ], dtype=np.float32)
         self.homography, _ = cv2.findHomography(src, dst)
+        self.maze_mask = None       # rebuilt for the next frame's size
         if not quiet:
             print("Homography computed")
+
+    def _maze_mask_for(self, shape) -> np.ndarray | None:
+        """Mask of the calibrated maze area, slightly enlarged, matching the picture size."""
+        if len(self.corners_image) != 4:
+            return None
+        if self.maze_mask is None or self.maze_mask.shape != shape[:2]:
+            mask = np.zeros(shape[:2], dtype=np.uint8)
+            cv2.fillPoly(mask, [np.array(self.corners_image, np.int32)], 255)
+            size = 2 * MAZE_MASK_MARGIN_PX + 1
+            self.maze_mask = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size)))
+        return self.maze_mask
+
+    def _mm2_per_px2(self, px: float, py: float) -> float:
+        """Local scale of the calibration: how many square mm one pixel covers here."""
+        ox, oy = self.pixel_to_maze_mm(px, py)
+        ax, ay = self.pixel_to_maze_mm(px + 1.0, py)
+        bx, by = self.pixel_to_maze_mm(px, py + 1.0)
+        return abs((ax - ox) * (by - oy) - (ay - oy) * (bx - ox))
+
+    def reset_track(self) -> None:
+        self.track_mm = None
+        self.zone = None
+        self.pending_mm = None
+        self.last_car_px = None
+        self.last_params = (0, 0, 0, 0)
 
     def maze_mm_to_pixel(self, mx: float, my: float) -> tuple[int, int]:
         pt = np.array([[[mx, my]]], dtype=np.float32)
@@ -729,8 +804,8 @@ class ProximityTracker:
     # ------------------------------------------------------------------
     # Arrow detection
     # ------------------------------------------------------------------
-    def detect_arrow(self, frame):
-        """Return (centroid_px, mask) or (None, mask)."""
+    def find_candidates(self, frame):
+        """Every blob of the arrow colour inside the maze: ([(centroid_px, area_px)], mask)."""
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = None
         for lo, hi in self.hsv_ranges:
@@ -738,6 +813,101 @@ class ProximityTracker:
             mask = m if mask is None else cv2.bitwise_or(mask, m)
         if mask is None:
             mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        maze_mask = self._maze_mask_for(frame.shape)
+        if maze_mask is not None:
+            mask = cv2.bitwise_and(mask, maze_mask)
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        candidates = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < MIN_CONTOUR_AREA / 4:
+                continue
+            m = cv2.moments(contour)
+            if m["m00"] == 0:
+                continue
+            candidates.append(((m["m10"] / m["m00"], m["m01"] / m["m00"]), area))
+        candidates.sort(key=lambda c: c[1], reverse=True)
+        return candidates, mask
+
+    def locate_car(self, frame, now: float):
+        """Pick the blob that is the car, using its size and where the car was last seen.
+
+        Returns (car_px or None, mask). Rejected blobs are remembered for the overlay.
+        """
+        candidates, mask = self.find_candidates(frame)
+        self.ignored_px = []
+        plausible = []
+        for (px, py), area_px in candidates:
+            area_mm2 = area_px * self._mm2_per_px2(px, py)
+            if ARROW_MIN_AREA_MM2 <= area_mm2 <= ARROW_MAX_AREA_MM2:
+                plausible.append(((px, py), self.pixel_to_maze_mm(px, py), area_px))
+            else:
+                self.ignored_px.append((int(px), int(py)))
+
+        chosen = None
+        if not plausible:
+            self.pending_mm = None
+        elif self.track_mm is None:
+            chosen = plausible[0]                       # first sighting: the largest plausible blob
+        else:
+            # How far the car could have moved since it was last seen
+            reach = JUMP_MARGIN_MM + JUMP_SPEED_LIMIT_MM_S * max(0.0, now - self.last_seen_time)
+            in_reach = [c for c in plausible
+                        if np.hypot(c[1][0] - self.track_mm[0], c[1][1] - self.track_mm[1]) <= reach]
+            if in_reach:
+                chosen = min(in_reach, key=lambda c: np.hypot(c[1][0] - self.track_mm[0],
+                                                              c[1][1] - self.track_mm[1]))
+                self.pending_mm = None
+            else:
+                # Nothing where the car could be. A far-away blob must hold still before it counts.
+                far = plausible[0]
+                if (self.pending_mm is not None
+                        and np.hypot(far[1][0] - self.pending_mm[0],
+                                     far[1][1] - self.pending_mm[1]) <= RELOCATE_RADIUS_MM):
+                    if now - self.pending_since >= RELOCATE_CONFIRM_S:
+                        chosen = far                    # the car really was moved
+                        self.track_mm = None            # restart smoothing at the new place
+                        self.zone = None
+                        self.pending_mm = None
+                else:
+                    self.pending_mm = far[1]
+                    self.pending_since = now
+
+        for candidate in plausible:
+            if candidate is not chosen:
+                self.ignored_px.append((int(candidate[0][0]), int(candidate[0][1])))
+        self.ignored_total += len(self.ignored_px)
+
+        if chosen is None:
+            return None, mask
+
+        mx, my = chosen[1]
+        if self.track_mm is None:
+            self.track_mm = (mx, my)
+        else:
+            a = POSITION_SMOOTHING
+            self.track_mm = (a * mx + (1 - a) * self.track_mm[0], a * my + (1 - a) * self.track_mm[1])
+        return self.maze_mm_to_pixel(*self.track_mm), mask
+
+    def detect_arrow(self, frame):
+        """Largest blob of the arrow colour, for the colour-picking preview: (centroid_px, mask)."""
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mask = None
+        for lo, hi in self.hsv_ranges:
+            m = cv2.inRange(hsv, lo, hi)
+            mask = m if mask is None else cv2.bitwise_or(mask, m)
+        if mask is None:
+            mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        maze_mask = self._maze_mask_for(frame.shape)
+        if maze_mask is not None:
+            mask = cv2.bitwise_and(mask, maze_mask)
 
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
@@ -790,7 +960,8 @@ class ProximityTracker:
     def motor_params_for(self, distance_mm, valid: bool, now: float):
         """Motor parameters for this frame, holding the last rate briefly when the arrow is lost."""
         if valid:
-            params = distance_to_motor_params(distance_mm, True)
+            self.zone = zone_index(min(distance_mm, MAX_DISTANCE_MM), self.zone)
+            params = zone_motor_params(self.zone)
             if params[1:3] != self.last_params[1:3]:
                 self.pulse_anchor = now          # restart the on-screen pulse with the new rate
             self.last_params = params
@@ -834,7 +1005,9 @@ class ProximityTracker:
         # --- zone rings ---
         if self.show_zones and self.destination_px and self.zone_rings and not setting_up:
             current_bound = None
-            if valid and distance_mm is not None and distance_mm >= ARRIVAL_THRESHOLD_MM:
+            if valid and self.zone is not None and 1 <= self.zone <= len(self.zone_rings):
+                current_bound = self.zone_rings[self.zone - 1][0]
+            elif valid and self.zone is None and distance_mm is not None and distance_mm >= ARRIVAL_THRESHOLD_MM:
                 current_bound = next((b for b, *_ in self.zone_rings if distance_mm <= b), None)
             for bound_mm, segments, label, label_px in self.zone_rings:
                 active = bound_mm == current_bound
@@ -854,6 +1027,12 @@ class ProximityTracker:
             label = (f"{'GOAL' if self.destination_is_fixed else 'GOAL (custom)'} "
                      f"({self.destination_mm[0]:.0f}, {self.destination_mm[1]:.0f}) mm")
             draw_label(frame, label, (dx + self.destination_ring_px + 6, dy + 5), GOAL_YELLOW, 0.5)
+
+        # --- blobs of the right colour that were rejected (glare, look-alikes) ---
+        if tracking:
+            for ix, iy in self.ignored_px[:12]:
+                cv2.drawMarker(frame, (ix, iy), (30, 30, 30), cv2.MARKER_TILTED_CROSS, 16, 4)
+                cv2.drawMarker(frame, (ix, iy), (200, 200, 200), cv2.MARKER_TILTED_CROSS, 14, 2)
 
         # --- car, or where it was last seen ---
         if car_px is not None:
@@ -1076,10 +1255,9 @@ class ProximityTracker:
         params = None
 
         if self.state == "TRACKING":
-            car_px, mask = self.detect_arrow(frame)
+            car_px, mask = self.locate_car(frame, now)
             if car_px is not None:
-                car_mm = self.pixel_to_maze_mm(car_px[0], car_px[1])
-                distance_mm = self.compute_distance(car_mm)
+                distance_mm = self.compute_distance(self.track_mm)
                 valid = True
                 self.last_car_px = car_px
                 self.last_seen_time = now

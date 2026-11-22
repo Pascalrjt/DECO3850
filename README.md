@@ -174,6 +174,18 @@ The setup is saved to `Vision/.tracker_settings.json` when tracking starts and a
 - The top bar shows the distance to the goal, a pulse light that blinks in time with the motor, and status lights for the Bridge and the arrow.
 - When the arrow is lost, the picture gets a red border and a marker where the car was last seen. The motor keeps its last pulse rate for 0.5 s (`ARROW_HOLD_S`), then pauses until the arrow is found again.
 
+### Rejecting glare and look-alike objects
+
+The tracker does not simply take the largest blob of the arrow colour. Tuneables are at the top of `Vision/proximity_tracker.py`.
+
+- **Maze only.** Anything outside the calibrated corners is ignored (`MAZE_MASK_MARGIN_PX`).
+- **Size check.** Blobs too small or too large to be the arrow are ignored (`ARROW_MIN_AREA_MM2`, `ARROW_MAX_AREA_MM2`).
+- **No impossible jumps.** The car tops out near 55 mm/s (72 mm wheels on 28BYJ-48 steppers), so the blob nearest the last position is preferred and moves faster than `JUMP_SPEED_LIMIT_MM_S` (300 mm/s) are rejected.
+- **Relocation.** If the car really is moved by hand, the new position is accepted once it has held still for `RELOCATE_CONFIRM_S` (0.5 s).
+- **Smoothing.** The position is lightly smoothed (`POSITION_SMOOTHING`), and the pulse rate only changes once the car is `ZONE_HYSTERESIS_MM` (12 mm) past a ring, so it does not flicker on a boundary.
+
+Rejected blobs are marked with a grey cross in the picture. A reflection that covers the arrow still hides the car; the tracker then holds the last rate for 0.5 s and pauses.
+
 ### Runtime keys
 
 - `Enter` — confirm the current step.
