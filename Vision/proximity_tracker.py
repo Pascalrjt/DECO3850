@@ -8,13 +8,16 @@ binary frames to a bridge ESP32 over USB serial.
 """
 
 import argparse
+import json
 import struct
 import sys
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
 import serial
+from serial.tools import list_ports
 
 # ---------------------------------------------------------------------------
 # Serial protocol (must match ProximityBridge_ESPNow / Pot_Controller)
@@ -34,27 +37,40 @@ FLAG_VALID = 0x01
 # ---------------------------------------------------------------------------
 # Maze geometry (mm)
 # ---------------------------------------------------------------------------
-MAZE_WIDTH_MM = 1200
-MAZE_HEIGHT_MM = 1200
+# The maze is 800 x 600 mm: 7 cells across, 5 cells down. Click the corners with
+# the 800 mm side as the top edge.
+MAZE_WIDTH_MM = 800
+MAZE_HEIGHT_MM = 600
+MAZE_COLS = 7
+MAZE_ROWS = 5
+
+# Fixed goal: centre of the cell in column 5, row 2 (counted from the top-left),
+# as (x, y) in mm from the top-left corner. [D] lets the overseer click another
+# spot for one run; [G] returns to this one.
+DEFAULT_DESTINATION_MM = (
+    (5 - 0.5) * MAZE_WIDTH_MM / MAZE_COLS,    # 514 mm across
+    (2 - 0.5) * MAZE_HEIGHT_MM / MAZE_ROWS,   # 180 mm down
+)
 
 # ---------------------------------------------------------------------------
 # Distance -> motor mapping
 # ---------------------------------------------------------------------------
-MAX_DISTANCE_MM = 1200.0
+MAX_DISTANCE_MM = 1000.0          # maze diagonal
 ARRIVAL_THRESHOLD_MM = 50.0
 
 PROX_STRENGTH = 255
 PROX_PULSE_ON_MS = 100
 PROX_ARRIVAL_PULSE_ON_MS = 500
 
-# (upper_bound_mm, pulse_off_ms) — 200 mm buckets, closer = faster cadence.
+# (upper_bound_mm, pulse_off_ms) — one bucket per maze cell (about 115 mm),
+# closer = faster cadence. Anything past the last bound uses the slowest cadence.
 PROX_DISTANCE_BUCKETS = (
-    (200, 100),     # 50-200 mm     ~5.0 Hz
-    (400, 220),     # 200-400 mm    ~3.1 Hz
-    (600, 400),     # 400-600 mm    ~2.0 Hz
-    (800, 700),     # 600-800 mm    ~1.25 Hz
-    (1000, 1150),   # 800-1000 mm   ~0.8 Hz
-    (1200, 1900),   # 1000-1200 mm  ~0.5 Hz
+    (115, 100),     # 50-115 mm     ~5.0 Hz
+    (230, 220),     # 115-230 mm    ~3.1 Hz
+    (345, 400),     # 230-345 mm    ~2.0 Hz
+    (460, 700),     # 345-460 mm    ~1.25 Hz
+    (575, 1150),    # 460-575 mm    ~0.8 Hz
+    (1000, 1900),   # over 575 mm   ~0.5 Hz
 )
 
 # ---------------------------------------------------------------------------
@@ -74,6 +90,150 @@ MAX_SV_TOL = 127
 MASK_WINDOW_NAME = "Mask"
 
 
+# ---------------------------------------------------------------------------
+# Start-up helpers: find the Bridge and pick the camera without typing flags
+# ---------------------------------------------------------------------------
+BRIDGE_MARKERS = (b"Forwarded:", b"Proximity bridge ready", b"Bridge MAC:")
+BRIDGE_LISTEN_S = 3.5             # the Bridge prints a status line every 2 s
+MAX_CAMERA_INDEX = 5              # camera numbers 0..5 are probed at start-up
+SETTINGS_PATH = Path(__file__).with_name(".tracker_settings.json")
+CAMERA_WINDOW_NAME = "Select Camera"
+
+
+def load_settings() -> dict:
+    try:
+        return json.loads(SETTINGS_PATH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(settings: dict) -> None:
+    try:
+        SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
+    except OSError as exc:
+        print(f"Could not save settings: {exc}")
+
+
+def find_bridge(baud: int):
+    """Listen on each USB serial port for the Bridge's status output.
+
+    Returns an open serial.Serial for the Bridge, or None when no Bridge answers.
+    Opening a port resets the ESP32 on it, so any other board plugged in restarts once.
+    """
+    candidates = [p.device for p in list_ports.comports()
+                  if "usb" in p.device.lower() or p.vid is not None]
+    if not candidates:
+        print("Looking for the Bridge ESP32... no USB serial ports found.")
+        return None
+
+    print("Looking for the Bridge ESP32...")
+    for device in sorted(candidates):
+        try:
+            port = serial.Serial(device, baud, timeout=0.2)
+        except (serial.SerialException, OSError) as exc:
+            print(f"  {device}   could not open ({exc})")
+            continue
+        heard = b""
+        deadline = time.monotonic() + BRIDGE_LISTEN_S
+        found = False
+        while time.monotonic() < deadline:
+            try:
+                heard += port.read(256)
+            except (serial.SerialException, OSError):
+                break
+            if any(marker in heard for marker in BRIDGE_MARKERS):
+                found = True
+                break
+        if found:
+            print(f"  {device}   Bridge found")
+            port.timeout = 0.01
+            return port
+        port.close()
+        print(f"  {device}   no Bridge status line (another board)")
+    return None
+
+
+def probe_cameras() -> list[int]:
+    """Return the camera numbers that open and deliver a picture."""
+    found = []
+    for index in range(MAX_CAMERA_INDEX + 1):
+        cap = cv2.VideoCapture(index)
+        if cap.isOpened():
+            ok, _ = cap.read()
+            if ok:
+                found.append(index)
+        cap.release()
+    return found
+
+
+def choose_camera(preferred: int | None) -> int | None:
+    """Show each camera's picture and let the overseer pick one.
+
+    [N] next, [P] previous, [Enter] use it, [Q] quit. Returns None on quit.
+    """
+    cameras = probe_cameras()
+    if not cameras:
+        print("No working camera found.")
+        return None
+    if len(cameras) == 1:
+        print(f"Found 1 camera. Using camera {cameras[0]}.")
+        return cameras[0]
+
+    position = cameras.index(preferred) if preferred in cameras else 0
+    remembered = preferred if preferred in cameras else None
+    message = f"Found {len(cameras)} cameras."
+    if remembered is not None:
+        message += f" Last time you used camera {remembered}."
+    print(message)
+    print("Pick the camera in the window: [N] next  [P] previous  [Enter] use it")
+
+    cv2.namedWindow(CAMERA_WINDOW_NAME)
+    cap = cv2.VideoCapture(cameras[position])
+    chosen = None
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                frame = np.zeros((360, 640, 3), dtype=np.uint8)
+            index = cameras[position]
+            height, width = frame.shape[:2]
+            cv2.rectangle(frame, (0, 0), (width, 40), (0, 0, 0), -1)
+            cv2.putText(frame, f"Camera {index} ({position + 1} of {len(cameras)})",
+                        (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+            if index == remembered:
+                cv2.putText(frame, "used last time", (width - 170, 27),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (120, 230, 120), 1)
+            cv2.rectangle(frame, (0, height - 34), (width, height), (0, 0, 0), -1)
+            cv2.putText(frame, "[N] next   [P] previous   [Enter] use this camera   [Q] quit",
+                        (10, height - 11), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (100, 215, 255), 1)
+            cv2.imshow(CAMERA_WINDOW_NAME, frame)
+
+            key = cv2.waitKey(30) & 0xFF
+            if key in (13, 10):
+                chosen = index
+                break
+            if key == ord("q"):
+                break
+            if key in (ord("n"), ord("p")):
+                step = 1 if key == ord("n") else -1
+                position = (position + step) % len(cameras)
+                cap.release()
+                cap = cv2.VideoCapture(cameras[position])
+    finally:
+        cap.release()
+        cv2.destroyWindow(CAMERA_WINDOW_NAME)
+        cv2.waitKey(1)
+    return chosen
+
+
+def draw_label(frame, text: str, origin: tuple[int, int], colour, scale: float = 0.5) -> None:
+    """Text on a dark backing box, so it reads on any floor colour."""
+    (width, height), baseline = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)
+    x, y = origin
+    cv2.rectangle(frame, (x - 3, y - height - 4), (x + width + 3, y + baseline + 2), (20, 20, 20), -1)
+    cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, colour, 1, cv2.LINE_AA)
+
+
 def xor_checksum(data: bytes) -> int:
     chk = 0
     for b in data:
@@ -85,6 +245,14 @@ def build_frame(seq: int, strength: int, pulse_on: int,
                 pulse_off: int, flags: int) -> bytes:
     payload = struct.pack(PACKET_FMT, seq, strength, pulse_on, pulse_off, flags)
     return FRAME_MAGIC + payload + bytes([xor_checksum(payload)])
+
+
+def pulse_rate_label(distance_mm: float) -> str:
+    """Human-readable cadence for the overlay."""
+    _, on, off, _ = distance_to_motor_params(distance_mm, True)
+    if off == 0:
+        return "solid on (arrived)"
+    return f"{1000.0 / (on + off):.1f} pulses/s"
 
 
 def distance_to_motor_params(distance_mm: float, valid: bool):
@@ -105,7 +273,7 @@ def distance_to_motor_params(distance_mm: float, valid: bool):
 
 
 class ProximityTracker:
-    def __init__(self, serial_port: str, baud: int, camera_id: int,
+    def __init__(self, serial_port: str | None, baud: int, camera_id: int | None,
                  hsv_lower, hsv_upper, h_tol: int, s_tol: int, v_tol: int,
                  skip_color_pick: bool):
         self.serial_port = serial_port
@@ -131,6 +299,11 @@ class ProximityTracker:
         self.homography: np.ndarray | None = None
         self.destination_mm: tuple[float, float] | None = None
         self.destination_px: tuple[int, int] | None = None
+        self.destination_ring_px: int = 0       # arrival radius drawn around the goal
+        self.destination_is_fixed = False       # True while the built-in goal is in use
+        # Zone rings around the goal, one per pulse-rate boundary: (bound_mm, segments, label, label_px)
+        self.zone_rings: list[tuple[float, list[np.ndarray], str, tuple[int, int] | None]] = []
+        self.show_zones = True                  # [Z] toggles the rings
 
         self.last_car_px: tuple[float, float] | None = None
         self.seq = 0
@@ -143,6 +316,15 @@ class ProximityTracker:
     # Setup
     # ------------------------------------------------------------------
     def connect_serial(self):
+        if self.serial_port is None:
+            # No --port given: find the Bridge by its status output
+            self.ser = find_bridge(self.baud)
+            if self.ser is not None:
+                self.serial_port = self.ser.port
+                print(f"Serial connected: {self.serial_port} @ {self.baud}")
+            else:
+                print("No Bridge found. Running in vision-only mode (no serial output)")
+            return
         try:
             self.ser = serial.Serial(self.serial_port, self.baud, timeout=0.01)
             print(f"Serial connected: {self.serial_port} @ {self.baud}")
@@ -152,6 +334,18 @@ class ProximityTracker:
             self.ser = None
 
     def open_camera(self):
+        if self.camera_id is None:
+            # No --camera given: pick on screen, starting from last time's choice
+            settings = load_settings()
+            chosen = choose_camera(settings.get("camera"))
+            if chosen is None:
+                print("No camera selected.")
+                if self.ser:
+                    self.ser.close()
+                sys.exit(1)
+            self.camera_id = chosen
+            settings["camera"] = chosen
+            save_settings(settings)
         self.cap = cv2.VideoCapture(self.camera_id)
         if not self.cap.isOpened():
             print(f"Failed to open camera {self.camera_id}")
@@ -172,24 +366,28 @@ class ProximityTracker:
             print(f"Corner {n}/4 ({labels[n-1]}): ({x}, {y})")
             if n == 4:
                 self._compute_homography()
+                self.use_fixed_destination()
                 if self.skip_color_pick:
-                    self.state = "SET_DESTINATION"
-                    print("Calibration done. Click inside the maze to set the destination.")
+                    self.state = "TRACKING"
+                    print("Calibration done. Tracking to the fixed goal.")
                 else:
                     self.state = "PICK_COLOR"
                     print("Calibration done. Click the car to sample its colour.")
 
         elif self.state == "PICK_COLOR":
             self.sample_color_at(self._last_frame, x, y)
-            self.state = "SET_DESTINATION"
-            print("Click inside the maze to set the destination.")
+            if self.destination_mm is not None:
+                self.state = "TRACKING"
+                print("Colour set. Tracking.")
+            else:
+                self.state = "SET_DESTINATION"
+                print("Click inside the maze to set the destination.")
 
         elif self.state == "SET_DESTINATION":
             pt = np.array([[[x, y]]], dtype=np.float32)
             transformed = cv2.perspectiveTransform(pt, self.homography)
             mx, my = float(transformed[0][0][0]), float(transformed[0][0][1])
-            self.destination_mm = (mx, my)
-            self.destination_px = (x, y)
+            self._set_destination(mx, my, fixed=False)
             self.state = "TRACKING"
             print(f"Destination set at ({mx:.0f}, {my:.0f}) mm")
 
@@ -203,6 +401,67 @@ class ProximityTracker:
         ], dtype=np.float32)
         self.homography, _ = cv2.findHomography(src, dst)
         print("Homography computed")
+
+    def maze_mm_to_pixel(self, mx: float, my: float) -> tuple[int, int]:
+        pt = np.array([[[mx, my]]], dtype=np.float32)
+        t = cv2.perspectiveTransform(pt, np.linalg.inv(self.homography))
+        return int(round(float(t[0][0][0]))), int(round(float(t[0][0][1])))
+
+    def _set_destination(self, mx: float, my: float, fixed: bool) -> None:
+        self.destination_mm = (mx, my)
+        self.destination_px = self.maze_mm_to_pixel(mx, my)
+        # Arrival radius in pixels, measured along the maze's x direction
+        edge = self.maze_mm_to_pixel(mx + ARRIVAL_THRESHOLD_MM, my)
+        self.destination_ring_px = max(4, int(round(float(np.hypot(
+            edge[0] - self.destination_px[0], edge[1] - self.destination_px[1])))))
+        self.destination_is_fixed = fixed
+        self._build_zone_rings()
+
+    def _build_zone_rings(self) -> None:
+        """Project each pulse-rate boundary (a circle in maze mm) into the camera picture.
+
+        The circles are drawn through the calibration mapping, so they stay true
+        if the camera views the maze at an angle. Parts outside the maze are dropped.
+        """
+        self.zone_rings = []
+        if self.destination_mm is None or self.homography is None:
+            return
+        gx, gy = self.destination_mm
+        inverse = np.linalg.inv(self.homography)
+        angles = np.linspace(0.0, 2.0 * np.pi, 145)
+        for bound_mm, _pulse_off in PROX_DISTANCE_BUCKETS[:-1]:
+            xs = gx + bound_mm * np.cos(angles)
+            ys = gy + bound_mm * np.sin(angles)
+            inside = (xs >= 0) & (xs <= MAZE_WIDTH_MM) & (ys >= 0) & (ys <= MAZE_HEIGHT_MM)
+            pts_mm = np.stack([xs, ys], axis=1).astype(np.float32).reshape(-1, 1, 2)
+            pts_px = cv2.perspectiveTransform(pts_mm, inverse).reshape(-1, 2)
+            segments, current = [], []
+            for point, keep in zip(pts_px, inside):
+                if keep:
+                    current.append(point)
+                elif len(current) > 1:
+                    segments.append(np.array(current, np.int32).reshape(-1, 1, 2))
+                    current = []
+                else:
+                    current = []
+            if len(current) > 1:
+                segments.append(np.array(current, np.int32).reshape(-1, 1, 2))
+            # Label each ring with the pulse rate felt just inside it
+            label = pulse_rate_label(bound_mm - 1.0).replace(" pulses/s", "/s")
+            label_px = None
+            if segments:
+                longest = max(segments, key=len)
+                mid = longest[len(longest) // 2][0]
+                label_px = (int(mid[0]) + 4, int(mid[1]) - 4)
+            self.zone_rings.append((float(bound_mm), segments, label, label_px))
+
+    def use_fixed_destination(self) -> None:
+        """Place the built-in goal. Needs the corner calibration first."""
+        if self.homography is None:
+            return
+        self._set_destination(DEFAULT_DESTINATION_MM[0], DEFAULT_DESTINATION_MM[1], fixed=True)
+        print(f"Goal fixed at ({DEFAULT_DESTINATION_MM[0]:.0f}, "
+              f"{DEFAULT_DESTINATION_MM[1]:.0f}) mm")
 
     # ------------------------------------------------------------------
     # Interactive colour sampling
@@ -352,10 +611,30 @@ class ProximityTracker:
             pts = np.array(self.corners_image, np.int32).reshape((-1, 1, 2))
             cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
 
-        if self.destination_px:
-            dx, dy = self.destination_px
-            cv2.drawMarker(frame, (int(dx), int(dy)),
-                           (0, 0, 255), cv2.MARKER_CROSS, 20, 2)
+        if self.show_zones and self.destination_px and self.zone_rings:
+            # The ring that bounds the car's current zone is drawn brighter and thicker
+            current_bound = None
+            if valid and distance_mm is not None and distance_mm >= ARRIVAL_THRESHOLD_MM:
+                current_bound = next((b for b, *_ in self.zone_rings if distance_mm <= b), None)
+            for bound_mm, segments, label, label_px in self.zone_rings:
+                active = bound_mm == current_bound
+                colour = (0, 255, 255) if active else (200, 230, 230)
+                # dark underlay first, so the ring shows on light and dark floors alike
+                cv2.polylines(frame, segments, False, (30, 30, 30), 5 if active else 3, cv2.LINE_AA)
+                cv2.polylines(frame, segments, False, colour, 3 if active else 1, cv2.LINE_AA)
+                if label_px is not None:
+                    draw_label(frame, label, label_px, colour, 0.45)
+
+        if self.destination_px and self.destination_mm:
+            dx, dy = int(self.destination_px[0]), int(self.destination_px[1])
+            goal_colour = (0, 215, 255)   # yellow (BGR)
+            cv2.circle(frame, (dx, dy), self.destination_ring_px, goal_colour, 2)   # arrival zone
+            cv2.circle(frame, (dx, dy), 6, goal_colour, -1)
+            cv2.drawMarker(frame, (dx, dy), (0, 0, 0), cv2.MARKER_CROSS, 12, 1)
+            label = (f"{'GOAL' if self.destination_is_fixed else 'GOAL (custom)'} "
+                     f"({self.destination_mm[0]:.0f}, {self.destination_mm[1]:.0f}) mm")
+            pos = (dx + self.destination_ring_px + 6, dy + 5)
+            draw_label(frame, label, pos, goal_colour, 0.5)
 
         if car_px is not None:
             cx, cy = int(car_px[0]), int(car_px[1])
@@ -373,14 +652,14 @@ class ProximityTracker:
         elif self.state == "SET_DESTINATION":
             text = "Click to set destination"
         elif valid and distance_mm is not None:
-            text = f"Distance: {distance_mm:.0f} mm"
+            text = f"Distance: {distance_mm:.0f} mm   {pulse_rate_label(distance_mm)}"
         else:
             text = "Arrow lost"
 
         cv2.putText(frame, text, (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame,
-                    "[R] reset cal   [C] re-pick colour   [D] new dest   [Q] quit",
+                    "[R] reset cal   [C] re-pick colour   [D] click new goal   [G] fixed goal   [Z] zones   [Q] quit",
                     (10, frame.shape[0] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
@@ -403,8 +682,8 @@ class ProximityTracker:
     # Main loop
     # ------------------------------------------------------------------
     def run(self):
-        self.open_camera()
         self.connect_serial()
+        self.open_camera()
 
         # Create the Mask window (with trackbars) FIRST so that Maze Tracker,
         # created after, comes to the front of the cocoa window stack on macOS.
@@ -477,6 +756,8 @@ class ProximityTracker:
                     self.homography = None
                     self.destination_mm = None
                     self.destination_px = None
+                    self.destination_is_fixed = False
+                    self.zone_rings = []
                     self.sampled_hsv = None
                     self.state = "CALIBRATING"
                     print("Calibration reset")
@@ -484,8 +765,16 @@ class ProximityTracker:
                     if self.homography is not None:
                         self.destination_mm = None
                         self.destination_px = None
+                        self.zone_rings = []
                         self.state = "SET_DESTINATION"
                         print("Click to set new destination")
+                elif key == ord("z"):
+                    self.show_zones = not self.show_zones
+                elif key == ord("g"):
+                    if self.homography is not None:
+                        self.use_fixed_destination()
+                        if self.state == "SET_DESTINATION":
+                            self.state = "TRACKING"
                 elif key == ord("c"):
                     if self.homography is not None:
                         self.state = "PICK_COLOR"
@@ -505,11 +794,11 @@ class ProximityTracker:
 def main():
     parser = argparse.ArgumentParser(
         description="Maze proximity tracker — streams haptic motor params to bridge ESP32")
-    parser.add_argument("--port", default="/dev/cu.usbserial-10",
-                        help="Serial port for the bridge ESP32")
+    parser.add_argument("--port", default=None,
+                        help="Serial port for the bridge ESP32 (default: find it automatically)")
     parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument("--camera", type=int, default=0,
-                        help="Camera device index")
+    parser.add_argument("--camera", type=int, default=None,
+                        help="Camera device index (default: pick on screen)")
     parser.add_argument("--hsv-lower", type=int, nargs=3, default=None,
                         help="HSV lower bound (H S V) — skips interactive pick")
     parser.add_argument("--hsv-upper", type=int, nargs=3, default=None,
