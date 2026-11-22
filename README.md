@@ -158,13 +158,33 @@ If no Bridge is found, or the given port cannot be opened, the script says so an
 - `--s-tol <int>` — initial saturation tolerance for the interactive picker. Default `60`.
 - `--v-tol <int>` — initial value tolerance for the interactive picker. Default `60`.
 
+### Setup steps
+
+The tracker window walks through the setup, with a banner naming the current step. Status bars sit above and below the camera picture, so nothing covers the maze. Camera pictures wider than 1280 px are scaled down to fit the screen.
+
+1. **Saved setup (normal start).** If corners and an arrow colour were saved for this camera, they are drawn over the live picture. `Enter` reuses them and starts tracking; `R` sets up again.
+2. **Corners.** Click the four corner posts where they meet the floor, in the order top-left, top-right, bottom-right, bottom-left. A 4x zoomed view follows the mouse. `Backspace` removes the last corner.
+3. **Grid check.** The 7 × 5 cell grid is drawn from the clicks. The lines should run through the posts. Drag a corner to adjust it, then press `Enter`.
+4. **Arrow colour.** Click the arrow on the car, then tune with the tolerance sliders in the `Mask` window. The detection mask also shows as an inset in the main window.
+
+The setup is saved to `Vision/.tracker_settings.json` when tracking starts and again on quit.
+
+### While tracking
+
+- The top bar shows the distance to the goal, a pulse light that blinks in time with the motor, and status lights for the Bridge and the arrow.
+- When the arrow is lost, the picture gets a red border and a marker where the car was last seen. The motor keeps its last pulse rate for 0.5 s (`ARROW_HOLD_S`), then pauses until the arrow is found again.
+
 ### Runtime keys
 
-- `R` — reset calibration (re-click the four corners).
+- `Enter` — confirm the current step.
+- `Backspace` — undo the last corner.
+- `R` — redo the whole setup.
 - `C` — re-pick the car colour.
 - `D` — click a different goal for this run.
 - `G` — return to the fixed goal.
 - `Z` — show or hide the zone rings.
+- `M` — show or hide the detection mask inset.
+- `H` — show or hide the key card.
 - `Q` — quit.
 
 ## Legacy Joystick Test Pinout
